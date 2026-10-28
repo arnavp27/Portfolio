@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import * as T from 'three';
 import { productionSource } from './helpers/production-source.mjs';
 import { createPointerCapture } from '../src/lib/garage/pointer-capture.ts';
 import {
@@ -24,9 +25,11 @@ for (const [event, handler] of [
 ])
   source.assertListener('mountExplorer', event, handler);
 source.assertCall('mountExplorer.leaveComputer', 'resume');
+source.assertCall('mountExplorer.draw', 'finishComputerReturn');
 const code = source.declarations('mountExplorer', [
   'inputState',
   'clearInput',
+  'resetJump',
   'onCapture',
   'capture',
   'unlock',
@@ -39,7 +42,10 @@ const code = source.declarations('mountExplorer', [
   'move',
   'keyDown',
   'keyUp',
+  'finishComputerReturn',
   'leaveComputer',
+  'useComputer',
+  'walkTo',
 ]);
 const makeHarness = Function(
   'createPointerCapture',
@@ -49,10 +55,12 @@ const makeHarness = Function(
   'acceptsMovement',
   'lookMode',
   'mouseSensitivity',
+  'T',
   `
  let entered=true,paused=true,guided=false,locked=false,phase='room',playRequested=false;
  let disposed=false,windowFocused=true,captureStatus='idle',yaw=0,pitch=0,auto=null,target=null,drag=null;
  let running=false,computer='projects',leaveTime=0,transitionTime=1.7,path=[];
+ let ready=true,focus=1,booted=false,autoAmount=0,autoDuration=1,autoLook=null;
  let requests=0,releases=0,interactions=0,pointerCaptures=0,clock=100,nextTimer=0,deferredRelease=false;
  const attempts=[],timers=new Map(),keys=new Set(),escape=createEscapeController(),jump=createJumpMotion();
  const finePointer={matches:true},velocity={set:()=>{}},performance={now:()=>clock},width=1280,height=720;
@@ -63,9 +71,13 @@ const makeHarness = Function(
   requestPointerLock(){requests++;return new Promise((resolve,reject)=>attempts.push({resolve,reject}));},
  };
  const options={sound:{start:()=>Promise.resolve(),play:()=>{}}};
- const T={MathUtils:{clamp:(value,min,max)=>Math.min(max,Math.max(min,value))}};
+ const eyeHeight=1.62,world={isComputerOn:()=>true};
+ const player=new T.Vector3(3,eyeHeight,4),view=new T.Vector3(3,eyeHeight,2);
+ const fromPosition=new T.Vector3(1,eyeHeight,2),fromTarget=new T.Vector3(1,eyeHeight,0);
  const emit=()=>{},wake=()=>{},interact=()=>interactions++,actionHit=()=>null;
- const destinations={projects:{x:0,z:0}},computerPose=()=>({position:{x:0,z:0}}),walkingPath=()=>[];
+ const destinations={projects:{x:0,z:2},kazam:{x:-1,z:2},courtyard:{x:0,z:10}};
+ const computerPose=id=>({position:new T.Vector3(destinations[id].x,eyeHeight,1.5),target:new T.Vector3(destinations[id].x,eyeHeight,0)});
+ const walkingPath=(from,to)=>[{x:from.x,z:from.z},{x:to.x,z:to.z}];
  const setPhase=next=>{phase=next;};
  const realCapture=createPointerCapture;
  createPointerCapture=(host,options)=>realCapture(host,{
@@ -73,7 +85,7 @@ const makeHarness = Function(
  });
  ${code}
  return {
-  resume,pause,mouseMove,down,move,keyDown,keyUp,leaveComputer,
+  resume,pause,mouseMove,down,move,keyDown,keyUp,leaveComputer,useComputer,walkTo,
   grant(){document.pointerLockElement=container;onLock();},
   clearNative(){document.pointerLockElement=null;},
   lose(){document.pointerLockElement=null;onLock();},
@@ -81,9 +93,9 @@ const makeHarness = Function(
   reject(index=attempts.length-1){attempts[index].reject(new Error('Capture denied'));},
   resolve(index=attempts.length-1){attempts[index].resolve();},
   expire(){const callbacks=[...timers.values()];timers.clear();for(const callback of callbacks)callback();},
-  set(state){if('phase'in state)phase=state.phase;if('guided'in state)guided=state.guided;if('paused'in state)paused=state.paused;if('entered'in state)entered=state.entered;},
+  set(state){if('phase'in state)phase=state.phase;if('guided'in state)guided=state.guided;if('paused'in state)paused=state.paused;if('entered'in state)entered=state.entered;if('computer'in state)computer=state.computer;},
   tick(){clock+=100;},
-  state:()=>({entered,paused,guided,locked,phase,playRequested,captureStatus,yaw,pitch,requests,releases,interactions,pointerCaptures,drag,keys:[...keys],timers:timers.size,nativeLocked:document.pointerLockElement===container}),
+  state:()=>({focus,computer,pathLength:path.length,player:player.toArray(),standing:fromPosition.toArray(),auto:!!auto,entered,paused,guided,locked,phase,playRequested,captureStatus,yaw,pitch,requests,releases,interactions,pointerCaptures,drag,keys:[...keys],timers:timers.size,nativeLocked:document.pointerLockElement===container}),
   dispose(){disposed=true;capture.dispose();},
  };
 `,
@@ -97,6 +109,7 @@ const harness = () =>
     acceptsMovement,
     lookMode,
     mouseSensitivity,
+    T,
   );
 const key = (value, options = {}) => ({
   key: value,
@@ -278,6 +291,8 @@ for (const phase of ['room', 'leaving']) {
       h.keyDown(key('Escape'));
     }
     assert(h.state().paused, phase + ': one Escape must leave the game paused in ' + order);
+    assert.equal(h.state().phase, 'room', 'Pausing a CRT return must release menu destinations');
+    if (phase === 'leaving') assert.deepEqual(h.state().player, h.state().standing);
     assert.equal(h.state().requests, 1);
     assert.deepEqual(h.state().keys, []);
     h.keyUp(key('Escape'));
@@ -299,8 +314,13 @@ for (const phase of ['room', 'leaving']) {
   assert(h.state().paused);
   h.reject();
   await flush();
+  assert.equal(h.state().phase, 'room', 'Denied CRT return must release the menu destinations');
+  assert(h.state().paused, 'Returning to the room must not enable uncaptured gameplay');
+  assert.equal(h.state().captureStatus, 'unavailable');
+  assert.equal(h.state().requests, 1, 'Settling a denied return must not retry capture');
+  const returnYaw = h.state().yaw;
   h.mouseMove(mouse(60));
-  assert.equal(h.state().yaw, 0);
+  assert.equal(h.state().yaw, returnYaw);
   h.keyUp(key('Escape'));
   h.tick();
   h.keyDown(key('Escape'));
@@ -308,6 +328,45 @@ for (const phase of ['room', 'leaving']) {
   h.grant();
   assert(!h.state().paused);
   h.dispose();
+}
+
+// Execute the real menu handlers after both rejection and bounded capture failure.
+// Desktop gameplay remains capture-gated, but a failed return cannot trap the menu.
+for (const failure of ['reject', 'timeout']) {
+  for (const destination of ['kazam', 'projects', 'courtyard']) {
+    const h = harness();
+    h.set({
+      phase: 'using',
+      paused: false,
+      computer: destination === 'kazam' ? 'projects' : 'kazam',
+    });
+    h.leaveComputer();
+    const standing = h.state().standing;
+    if (failure === 'reject') h.reject();
+    else h.expire();
+    await flush();
+    assert.equal(h.state().phase, 'room');
+    assert.equal(h.state().computer, null);
+    assert.equal(h.state().focus, 0);
+    assert.equal(h.state().pathLength, 0);
+    assert.deepEqual(h.state().player, standing, 'A failed return settles beside the correct desk');
+    assert(h.state().paused && !h.state().playRequested);
+    assert.equal(h.state().captureStatus, 'unavailable');
+    assert.equal(h.state().requests, 1);
+    assert.equal(lookMode(h.state()), 'inactive');
+    if (destination === 'courtyard') {
+      h.walkTo(destination);
+      assert(h.state().auto, 'Walk outside can schedule a route after a denied CRT return');
+      assert(h.state().paused, 'Walking still waits for actual capture');
+      assert.equal(h.state().requests, 2, 'Only the new menu gesture requests capture again');
+    } else {
+      h.useComputer(destination);
+      assert.equal(h.state().phase, 'approaching', 'Either computer remains usable from the menu');
+      assert.equal(h.state().computer, destination);
+      assert.equal(h.state().requests, 1, 'Opening a computer does not request gameplay capture');
+    }
+    h.dispose();
+  }
 }
 
 {
@@ -340,5 +399,5 @@ for (const phase of ['room', 'leaving']) {
 }
 
 console.log(
-  'PASS: captured-only relative look, rejection/cancellation/timeout recovery, asynchronous release recovery, native Escape ordering, CRT return capture, and guided drag controls.',
+  'PASS: captured-only relative look, rejection/cancellation/timeout recovery, asynchronous release recovery, native Escape ordering, denied CRT return/menu recovery, and guided drag controls.',
 );

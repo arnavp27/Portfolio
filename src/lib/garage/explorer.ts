@@ -205,6 +205,7 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
       paused = true;
       clearInput();
       target = null;
+      finishComputerReturn();
       // Retain the failure status for the menu's click-to-retry message. A late
       // grant is rejected by isAllowed because play intent is now false.
     }
@@ -245,6 +246,7 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
     target = null;
     // This must cancel even when already paused and awaiting capture.
     unlock();
+    finishComputerReturn();
     emit();
     wake();
   }
@@ -419,6 +421,17 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
     unlock();
     options.sound.play('chair');
     wake();
+  }
+  function finishComputerReturn() {
+    if (phase !== 'leaving') return;
+    // A paused or denied return must still release the computer phase so menu
+    // destinations remain usable. Input stays governed by pause and capture.
+    focus = 0;
+    computer = null;
+    path = [];
+    player.copy(fromPosition);
+    view.copy(fromTarget);
+    setPhase('room');
   }
   function leaveComputer() {
     if (phase === 'room' || phase === 'leaving') return;
@@ -747,13 +760,7 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
         setPhase('using');
         options.sound.play('ready');
       }
-      if (!paused && phase === 'leaving' && focus === 0) {
-        computer = null;
-        path = [];
-        player.copy(fromPosition);
-        view.copy(fromTarget);
-        setPhase('room');
-      }
+      if (!paused && phase === 'leaving' && focus === 0) finishComputerReturn();
     }
     camera.updateProjectionMatrix();
     camera.lookAt(view);
