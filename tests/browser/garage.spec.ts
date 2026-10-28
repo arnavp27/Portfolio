@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 test.describe('touch-guided garage', () => {
   test.use({ hasTouch: true });
   test('garage entry, Escape menu, both computers, and local assets', async ({ page }) => {
+    test.setTimeout(90_000);
     const failures: string[] = [];
     page.on('pageerror', (error) => failures.push(error.message));
     page.on('response', (response) => {
@@ -12,7 +13,10 @@ test.describe('touch-guided garage', () => {
     });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/');
-    await expect(page.getByRole('button', { name: 'Enter garage' })).toBeVisible();
+    // Software GPU rendering has a separate, bounded first-frame startup budget.
+    await expect(page.getByRole('button', { name: 'Enter garage' })).toBeVisible({
+      timeout: 45_000,
+    });
     // Touch entry selects guided mode automatically. Native desktop capture and
     // rejected/late grants have separate production-handler contracts.
     await page.getByRole('button', { name: 'Enter garage' }).click();

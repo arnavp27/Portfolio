@@ -74,7 +74,8 @@ test.describe('phone-sized touch exploration', () => {
     await fitsViewport();
     await page.goBack();
     const enter = page.getByRole('button', { name: 'Enter garage' });
-    await expect(enter).toBeVisible();
+    // Software GPU rendering has a separate, bounded first-frame startup budget.
+    await expect(enter).toBeVisible({ timeout: 45_000 });
     await enter.tap();
 
     const canvas = page.locator('.workshop-canvas');
