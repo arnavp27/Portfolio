@@ -1,0 +1,88 @@
+---
+import { getCollection, render } from 'astro:content';
+import Layout from '../layouts/Layout.astro';
+import Garage from './Garage';
+const projects = (await getCollection('projects', ({ data }) => !data.draft)).sort(
+  (a, b) => a.data.order - b.data.order,
+);
+const articles = (await getCollection('articles', ({ data }) => !data.draft)).sort(
+  (a, b) => b.data.date.getTime() - a.data.date.getTime(),
+);
+const sceneProjects = projects.map(({ id, data }) => ({
+  id,
+  title: data.title,
+  category: data.category,
+  summary: data.summary,
+  role: data.role,
+  status: data.status,
+  zone: data.zone,
+  scene: data.scene,
+  links: data.links,
+}));
+const rendered = await Promise.all(
+  projects.map(async (project) => ({ id: project.id, ...(await render(project)) })),
+);
+---
+
+<Layout immersive>
+  <Fragment slot="head">
+    <link rel="preload" as="image" href="/assets/garage/poster.webp" />
+    <link
+      rel="preload"
+      as="font"
+      type="font/ttf"
+      href="/assets/fonts/pixelify-sans.ttf"
+      crossorigin
+    />
+  </Fragment>
+  <main id="main">
+    <h1 class="sr-only">Arnav Patil — AI and machine learning engineer in Bengaluru</h1>
+    <Garage
+      client:load
+      projects={sceneProjects}
+      articles={articles.map((a) => ({
+        id: a.id,
+        title: a.data.title,
+      }))}
+    />
+    {rendered.map(({ id, Content }) => (
+      <template id={`case-${id}`}>
+        <Content />
+      </template>
+    ))}
+    <noscript>
+      <style is:inline>
+        .garage {
+          display: none !important;
+        }
+      </style>
+      <div class="no-scene-content">
+        <h2>Arnav Patil</h2>
+        <p>AI and machine learning engineer. Currently interning at Kazam in Bengaluru.</p>
+        {projects.map((p) => (
+          <article>
+            <h2>
+              <a href={`/work/${p.id}/`}>{p.data.title}</a>
+            </h2>
+            <p>{p.data.summary}</p>
+          </article>
+        ))}
+        {articles.length > 0 && (
+          <section>
+            <h2>
+              <a href="/notes/">Writing</a>
+            </h2>
+            {articles.map((a) => (
+              <p>
+                <a href={`/notes/${a.id}/`}>{a.data.title}</a>
+              </p>
+            ))}
+          </section>
+        )}
+        <p>
+          <a href="/resume/">Résumé</a> · <a href="mailto:thearnavpatil27@gmail.com">Say hello</a>
+        </p>
+      </div>
+    </noscript>
+  </main>
+</Layout>

@@ -1,0 +1,51 @@
+---
+import { getCollection, render } from 'astro:content';
+import Layout from '../../layouts/Layout.astro';
+export async function getStaticPaths() {
+  const projects = await getCollection('projects', ({ data }) => !data.draft);
+  return projects.map((project) => ({ params: { id: project.id }, props: { project } }));
+}
+const { project } = Astro.props;
+const { Content } = await render(project);
+---
+
+<Layout title={`${project.data.title} — Arnav Patil`} description={project.data.summary}>
+  <main class="detail-page content-width" id="main">
+    <div id="top"></div>
+    <a class="back-link" href="/">
+      ← Back to the garage
+    </a>
+    <header class="detail-header">
+      <p class="eyebrow">
+        {project.data.category} / {project.data.year}
+      </p>
+      <h1>{project.data.title}</h1>
+      <p class="detail-summary">{project.data.summary}</p>
+      <div class="detail-meta">
+        <span>{project.data.role}</span>
+        <span>{project.data.status}</span>
+      </div>
+      {project.data.links.length > 0 && (
+        <div class="detail-links">
+          {project.data.links.map((link) => (
+            <a class="button-link" href={link.url} target="_blank" rel="noreferrer">
+              {link.label} ↗
+            </a>
+          ))}
+        </div>
+      )}
+    </header>
+    {project.data.image && (
+      <figure class="detail-cover">
+        <img src={project.data.image} alt={project.data.imageAlt} width="1440" height="770" />
+        <figcaption>Team Gaia at Solar Decathlon India, 2025.</figcaption>
+      </figure>
+    )}
+    <article class="prose">
+      <Content />
+    </article>
+    <a class="back-link bottom-back" href="/work/">
+      ← All work
+    </a>
+  </main>
+</Layout>

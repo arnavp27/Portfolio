@@ -1,0 +1,34 @@
+---
+import { getCollection } from 'astro:content';
+import Layout from '../../layouts/Layout.astro';
+const articles = (await getCollection('articles', ({ data }) => !data.draft)).sort(
+  (a, b) => b.data.date.getTime() - a.data.date.getTime(),
+);
+if (!articles.length) return Astro.redirect('/');
+---
+
+<Layout title="Writing — Arnav Patil">
+  <main class="detail-page content-width" id="main">
+    <div id="top"></div>
+    <a class="back-link" href="/">
+      ← Back to the garage
+    </a>
+    <header class="detail-header">
+      <p class="eyebrow">From the notebook</p>
+      <h1>Writing</h1>
+    </header>
+    {articles.map((a) => (
+      <a class="article-link" href={`/notes/${a.id}/`}>
+        <span>{a.data.title}</span>
+        <time datetime={a.data.date.toISOString()}>
+          {a.data.date.toLocaleDateString('en-GB', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+            timeZone: 'UTC',
+          })}
+        </time>
+      </a>
+    ))}
+  </main>
+</Layout>

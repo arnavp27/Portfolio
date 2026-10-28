@@ -1,0 +1,38 @@
+---
+import { getCollection, render } from 'astro:content';
+import Layout from '../../layouts/Layout.astro';
+export async function getStaticPaths() {
+  return (await getCollection('articles', ({ data }) => !data.draft)).map((article) => ({
+    params: { id: article.id },
+    props: { article },
+  }));
+}
+const { article } = Astro.props;
+const { Content } = await render(article);
+---
+
+<Layout title={`${article.data.title} — Arnav Patil`} description={article.data.description}>
+  <main class="detail-page content-width" id="main">
+    <div id="top"></div>
+    <a class="back-link" href="/notes/">
+      ← All writing
+    </a>
+    <header class="detail-header">
+      <p class="eyebrow">
+        <time datetime={article.data.date.toISOString()}>
+          {article.data.date.toLocaleDateString('en-GB', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+            timeZone: 'UTC',
+          })}
+        </time>
+      </p>
+      <h1>{article.data.title}</h1>
+      <p class="detail-summary">{article.data.description}</p>
+    </header>
+    <article class="prose">
+      <Content />
+    </article>
+  </main>
+</Layout>

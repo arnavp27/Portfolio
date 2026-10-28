@@ -1,0 +1,83 @@
+/* Shared frame for the live 3D garage and its no-JavaScript fallback. */
+@font-face {
+  font-family: Pixel;
+  src: url('/assets/fonts/pixelify-sans.ttf') format('truetype');
+  font-display: swap;
+}
+body.is-immersive {
+  background: #182b31;
+}
+html:has(body.is-immersive) {
+  scroll-behavior: auto;
+  scroll-padding-top: 0;
+}
+.is-immersive .skip-link {
+  z-index: 1000;
+}
+.garage {
+  background: #0c1420;
+}
+.workshop-stage {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+.workshop-canvas,
+.workshop-poster {
+  position: absolute;
+  inset: 0;
+}
+.workshop-canvas {
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.scene-ready .workshop-canvas {
+  opacity: 1;
+}
+.workshop-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.workshop-poster {
+  filter: none;
+  opacity: 1;
+  transition: opacity 1.3s;
+}
+.scene-ready:not(.scene-fallback) .workshop-poster {
+  opacity: 0;
+}
+.scene-fallback .workshop-canvas {
+  display: none;
+}
+.no-scene-content {
+  padding: 100px 30px;
+  position: relative;
+  z-index: 10;
+  background: #142c30;
+  min-height: 100vh;
+}
+.no-scene-content h2 {
+  margin: 30px 0 15px;
+}
+.no-scene-content a {
+  text-decoration: underline;
+}
+.no-scene-content p {
+  max-width: 650px;
+}
+.reduce-motion .workshop-canvas {
+  transition: none;
+}
+.reduce-motion * {
+  animation: none !important;
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .garage * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

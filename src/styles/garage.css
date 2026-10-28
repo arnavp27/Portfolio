@@ -1,0 +1,814 @@
+@font-face {
+  font-family: Kannada;
+  src: url('/assets/fonts/noto-sans-kannada.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+.garage {
+  --ink: #efe4c8;
+  --amber: #e1b977;
+  font-family: Plex, monospace;
+  color: var(--ink);
+}
+.garage .workshop-stage {
+  /* Only menus scroll. Focus must never move the canvas inside the fixed stage. */
+  overflow: clip;
+  background: #18232a;
+}
+.garage .workshop-canvas canvas {
+  touch-action: none;
+  image-rendering: auto;
+}
+.garage .workshop-canvas {
+  outline: none;
+}
+.garage .workshop-poster {
+  background:
+    linear-gradient(#102b3540, #10242d80),
+    url('/assets/garage/poster.webp') center/cover;
+}
+.garage button {
+  cursor: pointer;
+}
+.garage button:focus-visible,
+.garage a:focus-visible,
+.garage input:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 5px;
+}
+.garage button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.garage-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 42%, transparent 48%, #0710173b 100%);
+  box-shadow: inset 0 0 80px #090d1418;
+}
+.garage-icon {
+  position: absolute;
+  z-index: 15;
+  top: 24px;
+  border: 1px solid #e9e2c630;
+  background: #111e23aa;
+  color: #d9d6bd;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  transition:
+    background 0.2s,
+    opacity 0.2s;
+  opacity: 0.75;
+}
+.garage-icon:hover {
+  opacity: 1;
+  background: #30413e;
+}
+.garage-icon svg,
+.garage-pc-sound svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: square;
+}
+.garage-menu-button {
+  left: 24px;
+}
+.garage-menu-button span {
+  font:
+    17px Plex,
+    monospace;
+}
+.garage-sound-button {
+  right: 24px;
+}
+.garage[data-computer-active='true'] > .workshop-stage > .garage-sound-button {
+  display: none;
+}
+.garage-modal {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  overflow: auto;
+  padding: 45px 7%;
+  background: linear-gradient(90deg, #07131ce8 0, #07131caa 30%, #07131c19 68%, transparent);
+  animation: garage-fade 0.3s ease;
+}
+.garage-menu-card {
+  width: min(430px, 100%);
+  padding: 25px 0;
+  flex: none;
+}
+.garage-eyebrow {
+  font:
+    10px/1.5 Plex,
+    monospace;
+  letter-spacing: 2px;
+  color: #bdc3ac;
+  margin: 0 0 25px;
+}
+.garage-menu-card h2 {
+  font:
+    clamp(65px, 7vw, 108px)/0.86 Pixel,
+    monospace;
+  letter-spacing: -2px;
+  margin: 0 0 24px;
+  color: #f3e7c7;
+  text-shadow: 4px 5px #13252c;
+}
+.garage-intro {
+  font:
+    12px/1.8 Plex,
+    monospace;
+  color: #c2c5ad;
+  margin: 24px 0 32px;
+}
+.garage-enter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 50px;
+  width: 100%;
+  padding: 17px 20px;
+  border: 1px solid #e1bc7c;
+  background: #dfbd80;
+  color: #24302b;
+  font:
+    14px Plex,
+    monospace;
+  box-shadow: 3px 3px #080e1466;
+}
+.garage-enter:hover {
+  background: #f2d5a2;
+}
+.garage-enter span {
+  font-size: 22px;
+  line-height: 1;
+}
+.garage-entry-keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  font:
+    9px Plex,
+    monospace;
+  margin-top: 35px;
+  color: #b2bba7;
+}
+.garage kbd {
+  font:
+    9px Plex,
+    monospace;
+  letter-spacing: 0.5px;
+  padding: 3px 5px;
+  border: 1px solid #b3bf9f6b;
+  color: #e1dfc7;
+  white-space: nowrap;
+}
+.garage-entry-keys > span {
+  opacity: 0.4;
+  margin: 0 3px;
+}
+.garage-contact-links {
+  display: flex;
+  gap: 27px;
+  font:
+    10px Plex,
+    monospace;
+  margin-top: 28px;
+  color: #abb7a9;
+}
+.garage-contact-links a:hover {
+  color: #f0d59e;
+}
+.garage-pause {
+  background: #0b171f8c;
+  backdrop-filter: blur(4px);
+  justify-content: center;
+}
+.garage-pause .garage-menu-card {
+  background: #152229f2;
+  padding: 32px 36px;
+  border: 1px solid #9ca28660;
+  box-shadow: 8px 10px #080e143b;
+  width: min(460px, 100%);
+}
+.garage-pause .garage-menu-card h2 {
+  font-size: 40px;
+  line-height: 1;
+  letter-spacing: -1px;
+}
+.garage-pause .garage-eyebrow {
+  margin-bottom: 15px;
+  font-size: 9px;
+}
+.garage-pause .garage-enter {
+  font-size: 12px;
+  padding: 13px 15px;
+}
+.garage-shortcuts {
+  display: grid;
+  margin: 21px 0;
+}
+.garage-shortcuts button,
+.garage-shortcuts a {
+  background: none;
+  color: #d4dbc6;
+  border: 0;
+  border-bottom: 1px solid #a0ac8b33;
+  padding: 12px 0;
+  display: flex;
+  justify-content: space-between;
+  font:
+    11px Plex,
+    monospace;
+  text-align: left;
+}
+.garage-shortcuts button:hover {
+  color: var(--amber);
+}
+.garage-audio-settings {
+  border-top: 1px solid #9fac9040;
+  padding-top: 16px;
+}
+.garage-audio-settings label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 10px 0;
+  font:
+    10px Plex,
+    monospace;
+  color: #b9c5b1;
+}
+.garage-audio-settings input {
+  width: 135px;
+  accent-color: #cfb37d;
+  cursor: pointer;
+}
+.garage-motion {
+  background: none;
+  border: 0;
+  color: #b9c5b1;
+  padding: 10px 0 0;
+  font:
+    10px Plex,
+    monospace;
+}
+.garage-motion[aria-pressed='true'] {
+  color: var(--amber);
+}
+.garage-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font:
+    11px Plex,
+    monospace;
+  color: #b4c2b1;
+  padding: 15px 0;
+}
+.garage-loading span {
+  height: 3px;
+  width: 25px;
+  background: #c6b483;
+  animation: garage-load 1s ease infinite;
+}
+.garage-reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  transform: translate(-50%, -50%);
+  background: #e4e6d4b3;
+  box-shadow: 0 0 2px #000;
+  z-index: 4;
+  pointer-events: none;
+  transition:
+    width 0.12s,
+    height 0.12s;
+}
+.garage-reticle.has-target {
+  width: 11px;
+  height: 11px;
+  border: 1px solid #f1dc9ca6;
+  background: transparent;
+  box-shadow: 0 0 5px #eac77b22;
+}
+.garage-interact {
+  position: absolute;
+  z-index: 5;
+  bottom: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #112127db;
+  border: 1px solid #c7c9ab40;
+  padding: 12px 17px;
+  color: #ebe6cd;
+  font:
+    11px Plex,
+    monospace;
+  white-space: nowrap;
+  box-shadow: 0 4px 20px #0003;
+}
+.garage-interact:hover {
+  border-color: var(--amber);
+}
+.garage-controls-hint {
+  position: absolute;
+  bottom: 38px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  color: #d1d8c1;
+  text-shadow: 0 2px 5px #000;
+  font:
+    10px Plex,
+    monospace;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: garage-fade 0.6s;
+}
+.garage-controls-hint span {
+  opacity: 0.4;
+}
+.garage-guided {
+  position: absolute;
+  z-index: 5;
+  bottom: 25px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+}
+.garage-guided button {
+  border: 1px solid #aeb99c69;
+  color: #e6e4c8;
+  background: #142229e6;
+  padding: 13px 17px;
+  white-space: nowrap;
+  font:
+    10px Plex,
+    monospace;
+}
+.garage-guided button:hover {
+  background: #3b4b41;
+}
+.garage .computer-layer {
+  z-index: 12;
+}
+.garage .computer-step-away {
+  bottom: 25px;
+  right: 25px;
+  font-size: 10px;
+  gap: 10px;
+  padding: 11px 14px;
+}
+.garage-pc-sound {
+  position: absolute;
+  left: 25px;
+  bottom: 25px;
+  width: 42px;
+  height: 42px;
+  background: #101c20db;
+  border: 1px solid #a4a38468;
+  color: #d1d8c1;
+  padding: 10px;
+  pointer-events: auto;
+}
+.garage .computer-surface {
+  background: #071312;
+}
+.garage-static {
+  position: absolute;
+  inset: 0;
+  z-index: 400;
+  pointer-events: none;
+  display: none;
+  opacity: 0.28;
+  background-image: url('/assets/audio/static.png');
+  background-size: 128px 128px;
+  mix-blend-mode: screen;
+}
+.garage [data-booting='true'] .garage-static {
+  display: block;
+  animation: garage-static 0.12s steps(2) infinite;
+}
+.garage .os-boot {
+  background: #0e1c1d;
+  gap: 12px;
+}
+.garage .os-boot > strong {
+  font-size: 25px;
+}
+.garage .os-boot > span {
+  font-size: 11px;
+}
+.garage .os-directory-count {
+  margin-top: 15px;
+}
+.garage-inspect {
+  justify-content: center;
+  background: #07121b99;
+  backdrop-filter: blur(3px);
+}
+.garage-scrapbook {
+  width: min(680px, 100%);
+  max-height: 85dvh;
+  overflow: auto;
+  padding: 24px 35px 40px;
+  background: #d6cfb5;
+  color: #354238;
+  box-shadow: 8px 10px #07131b66;
+  border: 6px solid #7e6447;
+  font:
+    13px/1.8 Plex,
+    monospace;
+  scrollbar-color: #8b896e #c7c1a9;
+}
+.garage-scrapbook header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font:
+    9px Plex,
+    monospace;
+  color: #63705b;
+  border-bottom: 1px solid #9b9e83;
+  padding-bottom: 15px;
+}
+.garage-scrapbook header button {
+  background: none;
+  border: 0;
+  color: #3e5140;
+  font-size: 26px;
+  padding: 5px 10px;
+}
+.garage-scrapbook h2 {
+  font:
+    42px Pixel,
+    monospace;
+  margin: 25px 0 12px;
+}
+.garage-photo-note {
+  font-size: 10px;
+  color: #526c43;
+}
+.garage-scrapbook img {
+  width: 100%;
+  margin: 20px 0 8px;
+  border: 8px solid #f2e9cc;
+  box-shadow: 2px 4px #666c4c30;
+  transform: rotate(-0.7deg);
+}
+.garage-scrapbook em {
+  font-size: 10px;
+  color: #687159;
+}
+.garage-scrapbook p {
+  margin: 15px 0;
+}
+.garage-scrapbook > div > h2:first-child {
+  display: none;
+}
+@keyframes garage-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes garage-load {
+  50% {
+    transform: scaleX(0.35);
+    opacity: 0.5;
+  }
+}
+@keyframes garage-static {
+  0% {
+    background-position: 0 0;
+  }
+  50% {
+    background-position: 37px -58px;
+  }
+  100% {
+    background-position: -11px 29px;
+  }
+}
+@media (max-width: 650px) {
+  .garage-modal {
+    padding: 35px 25px;
+    background: linear-gradient(0deg, #08131cea 0, #08131cc9 40%, #08131c1c 100%);
+    align-items: flex-end;
+  }
+  .garage-menu-card {
+    padding: 20px 0;
+  }
+  .garage-menu-card h2 {
+    font-size: 72px;
+  }
+  .garage-entry-keys {
+    display: none;
+  }
+  .garage-contact-links {
+    margin-top: 23px;
+  }
+  .garage-intro {
+    margin: 20px 0 24px;
+    font-size: 11px;
+  }
+  .garage-eyebrow {
+    font-size: 9px;
+    margin-bottom: 20px;
+  }
+  .garage-icon {
+    top: 17px;
+  }
+  .garage-menu-button {
+    left: 17px;
+  }
+  .garage-sound-button {
+    right: 17px;
+  }
+  .garage-controls-hint {
+    font-size: 9px;
+    bottom: 90px;
+    width: 100%;
+    justify-content: center;
+    gap: 6px;
+  }
+  .garage-pause {
+    align-items: center;
+    padding: 20px;
+    background: #0b171fa8;
+  }
+  .garage-pause .garage-menu-card {
+    padding: 25px 23px;
+  }
+  .garage-guided {
+    bottom: 20px;
+    gap: 4px;
+  }
+  .garage-guided button {
+    padding: 13px 12px;
+    font-size: 9px;
+  }
+  .garage-interact {
+    bottom: 30%;
+    font-size: 10px;
+  }
+  .garage-inspect {
+    align-items: center;
+    padding: 12px;
+    background: #07121b99;
+  }
+  .garage-scrapbook {
+    padding: 15px 20px 30px;
+    max-height: 90dvh;
+    border-width: 4px;
+  }
+  .garage .computer-step-away {
+    right: 18px;
+    bottom: 20px;
+  }
+  .garage-pc-sound {
+    left: 18px;
+    bottom: 20px;
+  }
+}
+@media (max-height: 650px) {
+  .garage-pause .garage-menu-card {
+    padding: 18px 26px;
+  }
+  .garage-pause .garage-menu-card h2 {
+    margin-bottom: 15px;
+  }
+  .garage-shortcuts {
+    margin: 12px 0;
+  }
+  .garage-shortcuts button {
+    padding: 9px 0;
+  }
+  .garage-contact-links {
+    margin-top: 15px;
+  }
+  .garage-menu-card h2 {
+    font-size: 65px;
+  }
+}
+.reduce-motion .garage-static {
+  animation: none;
+  opacity: 0.08;
+}
+.reduce-motion .garage-modal {
+  animation: none;
+}
+.reduce-motion .garage-controls-hint {
+  animation: none;
+}
+
+.garage:has(.garage-guided) .garage-controls-hint {
+  bottom: 88px;
+}
+
+.garage-pause .garage-eyebrow {
+  display: none;
+}
+
+@media (max-width: 450px) {
+  .garage-guided {
+    max-width: calc(100% - 24px);
+    gap: 3px;
+  }
+  .garage-guided button {
+    padding: 12px 9px;
+    font-size: 8px;
+  }
+}
+
+/* Recovery stays readable when the canvas cannot start, including short mobile screens. */
+.garage.scene-fallback .garage-modal {
+  align-items: flex-start;
+  background: linear-gradient(90deg, #07131cf5 0, #07131ce8 36%, #07131c6b 70%, #07131c30);
+}
+.garage.scene-fallback .garage-menu-card {
+  width: min(460px, 100%);
+  margin: auto 0;
+  padding: 25px 0;
+}
+.garage.scene-fallback .garage-eyebrow {
+  display: block;
+  margin-bottom: 20px;
+}
+.garage .garage-recovery h2 {
+  font:
+    clamp(30px, 3.5vw, 46px)/1.05 Pixel,
+    monospace;
+  letter-spacing: -0.5px;
+  margin: 0 0 18px;
+  text-shadow: 2px 3px #13252c;
+  outline: none;
+}
+.garage-recovery-description,
+.garage-recovery-steps {
+  font:
+    12px/1.8 Plex,
+    monospace;
+  color: #d0d4c3;
+}
+.garage-recovery-description {
+  margin: 0 0 18px;
+}
+.garage-recovery-steps {
+  padding-left: 23px;
+  margin: 0 0 22px;
+}
+.garage-recovery-steps li {
+  padding-left: 5px;
+  margin: 10px 0;
+}
+.garage-recovery strong {
+  font-weight: 600;
+  color: #f0e2bf;
+}
+.garage-browser-help {
+  border-block: 1px solid #a0ac8b40;
+  padding: 13px 0;
+  font:
+    11px/1.75 Plex,
+    monospace;
+  color: #c1c9b8;
+}
+.garage-browser-help summary {
+  cursor: pointer;
+  color: #e1b977;
+  list-style-position: inside;
+  min-height: 24px;
+}
+.garage-browser-help summary:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 4px;
+}
+.garage-browser-help dl {
+  margin: 16px 0;
+}
+.garage-browser-help dl > div {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  gap: 14px;
+  margin: 16px 0;
+}
+.garage-browser-help dt {
+  color: #eee4c8;
+}
+.garage-browser-help dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.garage-browser-help code {
+  display: inline-block;
+  font:
+    10px/1.8 Plex,
+    monospace;
+  color: #e3d8b6;
+  user-select: all;
+}
+.garage-browser-help p {
+  margin: 15px 0 0;
+  color: #aebca9;
+}
+.garage-retry {
+  margin-top: 22px;
+  font-size: 12px;
+}
+.garage-recovery-alternative {
+  font:
+    11px/1.8 Plex,
+    monospace;
+  color: #b6c3b0;
+  margin: 24px 0 0;
+}
+.garage.scene-fallback .garage-shortcuts {
+  margin: 8px 0 0;
+}
+.garage.scene-fallback .garage-contact-links {
+  margin-top: 22px;
+}
+@media (max-width: 650px) {
+  .garage.scene-fallback .garage-modal {
+    padding: 70px 24px 30px;
+    background: #07131ce8;
+  }
+  .garage.scene-fallback .garage-menu-card {
+    margin: 0 auto;
+  }
+  .garage-recovery-description,
+  .garage-recovery-steps {
+    font-size: 11px;
+  }
+  .garage.scene-fallback .garage-menu-card h2 {
+    font-size: 34px;
+  }
+}
+
+/* Capture failures remain in the pause menu; free exploration never uses a free cursor. */
+.garage-capture-help {
+  margin: 13px 0 0;
+  color: #d1c8ae;
+  font:
+    11px/1.7 Plex,
+    monospace;
+}
+.garage .computer-layer[hidden] {
+  display: none;
+}
+
+.garage-entry-touch {
+  display: none;
+  margin: 24px 0 0;
+  color: #b2bba7;
+  font:
+    10px/1.7 Plex,
+    monospace;
+}
+.garage[data-guided='false'][data-paused='false']:is(
+    [data-computer-phase='approaching'],
+    [data-computer-phase='leaving']
+  )
+  .workshop-stage {
+  cursor: none;
+}
+/* The explorer controls the canvas cursor inline during ordinary room play. */
+.garage[data-guided='false'][data-paused='false']:is(
+    [data-computer-phase='approaching'],
+    [data-computer-phase='leaving']
+  )
+  .workshop-canvas {
+  cursor: none !important;
+}
+@media (pointer: coarse) {
+  .garage-entry-keys {
+    display: none;
+  }
+  .garage-entry-touch {
+    display: block;
+  }
+}

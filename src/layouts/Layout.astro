@@ -1,0 +1,99 @@
+---
+import { getCollection } from 'astro:content';
+import '../styles/global.css';
+interface Props {
+  title?: string;
+  description?: string;
+  immersive?: boolean;
+}
+const {
+  title = 'Arnav Patil — AI / ML engineer, Bengaluru',
+  description = 'AI, machine learning, and things I’ve built. Currently at Kazam in Bengaluru.',
+  immersive = false,
+} = Astro.props;
+const articles = await getCollection('articles', ({ data }) => !data.draft);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101c23" />
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <title>{title}</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <link
+      rel="preload"
+      href="/assets/fonts/instrument-sans.ttf"
+      as="font"
+      type="font/ttf"
+      crossorigin
+    />
+    <slot name="head" />
+  </head>
+  <body class:list={{ 'is-immersive': immersive }}>
+    <a class="skip-link" href="#main">
+      Skip to content
+    </a>
+    {!immersive && (
+      <header class="site-header">
+        <a class="wordmark" href="/" aria-label="Arnav Patil home">
+          <svg class="brand-star" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 1v22M1 12h22M4.2 4.2l15.6 15.6M4.2 19.8 19.8 4.2"
+              stroke="currentColor"
+              stroke-width="2.2"
+            />
+          </svg>
+          <span>ARNAV PATIL</span>
+        </a>
+        <nav aria-label="Main navigation">
+          <a href="/work/">Work</a>
+          {articles.length > 0 && <a href="/notes/">Writing</a>}
+          <a href="/resume/">Résumé</a>
+          <a href="mailto:thearnavpatil27@gmail.com">
+            Contact <span aria-hidden="true">↗</span>
+          </a>
+        </nav>
+      </header>
+    )}
+    <slot />
+    {!immersive && (
+      <footer class="site-footer" id="contact">
+        <div>
+          <span class="eyebrow">Get in touch</span>
+          <h2>
+            <a href="mailto:thearnavpatil27@gmail.com">
+              Say hello<span aria-hidden="true"> ↗</span>
+            </a>
+          </h2>
+          <a class="email-address" href="mailto:thearnavpatil27@gmail.com">
+            thearnavpatil27@gmail.com
+          </a>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/arnavp27" target="_blank" rel="noreferrer">
+            GitHub ↗
+          </a>
+          <a href="https://www.linkedin.com/in/thearnavpatil/" target="_blank" rel="noreferrer">
+            LinkedIn ↗
+          </a>
+          <span>
+            Bengaluru, India
+            <br />
+            12.97° N · 77.59° E
+          </span>
+        </div>
+        <div class="footer-bottom">
+          <span>© {new Date().getFullYear()} Arnav Patil</span>
+          <span>Made with a soft spot for Bengaluru.</span>
+          <a href="#top">Back to top ↑</a>
+        </div>
+      </footer>
+    )}
+  </body>
+</html>

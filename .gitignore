@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.astro/
+.vite/
+.env
+.env.*
+!.env.example
+.DS_Store
+playwright-report/
+test-results/
+coverage/
+*.log
+
+# Historical versions and source material live outside this repository.
+versions/
+SDI/
+art-source/
