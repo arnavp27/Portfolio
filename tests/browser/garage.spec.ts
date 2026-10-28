@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { defaultGraphics, GRAPHICS_STORAGE_KEY } from '../../src/lib/garage/graphics-settings';
 
 test.describe('touch-guided garage', () => {
   test.use({ hasTouch: true });
@@ -12,6 +13,21 @@ test.describe('touch-guided garage', () => {
       }
     });
     await page.emulateMedia({ reducedMotion: 'reduce' });
+    // Preferences saved by the former public editor must not change the live look.
+    await page.addInitScript(
+      ({ key, settings }) => localStorage.setItem(key, JSON.stringify(settings)),
+      {
+        key: GRAPHICS_STORAGE_KEY,
+        settings: {
+          renderScale: 0.3,
+          antialias: 'off',
+          rain: false,
+          contrast: 1.4,
+          saturation: 0,
+          vignette: 0,
+        },
+      },
+    );
     await page.goto('/');
     // Software GPU rendering has a separate, bounded first-frame startup budget.
     await expect(page.getByRole('button', { name: 'Enter garage' })).toBeVisible({
@@ -23,8 +39,22 @@ test.describe('touch-guided garage', () => {
     const canvas = page.locator('.workshop-canvas');
     await expect(canvas).toHaveAttribute('data-play-state', 'room');
     await expect(canvas).toHaveAttribute('data-control-mode', 'guided');
+    await expect(canvas).toHaveAttribute('data-graphics-settings', JSON.stringify(defaultGraphics));
+    await expect(page.locator('.garage-vignette')).toHaveCSS('opacity', '1');
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: 'Garage menu', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Graphics & display/ })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Graphics settings' })).toHaveCount(0);
+    await expect(page.getByRole('slider', { name: 'Music volume' })).toBeVisible();
+    await expect(page.getByRole('slider', { name: 'Sound effects volume' })).toBeVisible();
+    const motion = page.getByRole('button', { name: 'Reduced motion on' });
+    await expect(motion).toHaveAttribute('aria-pressed', 'true');
+    await motion.click();
+    await expect(page.getByRole('button', { name: 'Reduce motion', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    await page.getByRole('button', { name: 'Reduce motion', exact: true }).click();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: 'Garage menu', exact: true })).toBeHidden();
     for (const [button, dialog] of [

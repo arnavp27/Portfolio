@@ -125,11 +125,20 @@ const percentage = (value: number) => `${Math.round(value * 100)}%`;
 
 export default function GraphicsPanel({ settings, onChange, onPreview, onClose }: Props) {
   const titleId = useId();
+  const closeButton = useRef<HTMLButtonElement>(null);
   const [comparing, setComparing] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
   const [copyFallback, setCopyFallback] = useState('');
   const previewRef = useRef(onPreview);
   previewRef.current = onPreview;
+
+  // Focus after the dev-only module has actually mounted, not while it is loading.
+  useEffect(() => {
+    const button = closeButton.current;
+    if (button?.isConnected && button.getClientRects().length && !document.pointerLockElement) {
+      button.focus({ preventScroll: true });
+    }
+  }, []);
 
   // Also restore the experiment when the parent closes the panel with Escape.
   useEffect(
@@ -190,6 +199,7 @@ export default function GraphicsPanel({ settings, onChange, onPreview, onClose }
         <button
           type="button"
           className="graphics-panel-close"
+          ref={closeButton}
           aria-label="Close graphics settings"
           onClick={close}
         >

@@ -19,7 +19,7 @@ Open [localhost:4173](http://127.0.0.1:4173/). No backend, API keys or external 
 
 WASD moves, the mouse looks around, Shift toggles running, Space jumps and E interacts. Escape pauses or steps away from a computer. Touch devices use guided destination controls. Desktop entry captures the mouse after a click; exploration stays paused until capture succeeds. Escape releases the pointer into the menu, and returning to play captures it again. Sound begins after entry, with mute and volume controls. Projects and résumé pages also work without 3D graphics or JavaScript.
 
-Pause with Escape, then open **Graphics & display** to tune the scene live. Resolution, smoothing, lighting, shadows, glow, fog and colour settings stay in your browser. **Compare current look** temporarily shows the defaults; **Reset current look** restores them. **Copy settings** exports your experiment for choosing future defaults. Rendering never automatically downgrades.
+Only `npm run dev` includes **Graphics & display** in the Escape menu for local art direction. Its experiments stay in your development browser; **Compare current look**, **Reset current look** and **Copy settings** help choose future defaults. Production builds exclude the editor and ignore previously saved graphics experiments. Visitors get the authored 60% look, sound controls and reduced motion. Rendering never automatically downgrades.
 
 ## Develop and verify
 

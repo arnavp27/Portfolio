@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import GarageRecovery from './GarageRecovery';
-import GraphicsPanel from './GraphicsPanel';
 import {
   defaultGraphics,
   normalizeGraphics,
@@ -19,6 +18,11 @@ import type { ExplorerControls, ExplorerState } from '../lib/garage/explorer';
 import type { ComputerState, ComputerId } from '../lib/garage/computers';
 import '../styles/scene.css';
 import '../styles/garage.css';
+// Start loading the local editor (including its button styles) only in dev.
+// Vite removes this import and its assets entirely from production builds.
+const devGraphicsModule = import.meta.env.DEV ? import('./GraphicsPanel') : null;
+const DevGraphicsPanel = devGraphicsModule ? lazy(() => devGraphicsModule) : null;
+
 type Props = { projects: DesktopProject[]; articles: { id: string; title: string }[] };
 const initial: ExplorerState = {
   entered: false,
@@ -85,7 +89,9 @@ export default function Garage({ projects, articles }: Props) {
     entry = !game.entered,
     capturePending = game.capture === 'requesting',
     computerBlocked = game.paused || inspect || graphicsOpen;
-  const effectiveGraphics = graphicsPreview ?? graphicsSettings;
+  const effectiveGraphics = import.meta.env.DEV
+    ? (graphicsPreview ?? graphicsSettings)
+    : defaultGraphics;
   const solar = projects.find((p) => p.scene === 'solar');
   useEffect(() => {
     let cancelled = false,
@@ -105,14 +111,17 @@ export default function Garage({ projects, articles }: Props) {
         };
       motion = localStorage.getItem('workshop-reduced') === 'true' || motion;
     } catch {}
-    try {
-      graphicsRef.current = normalizeGraphics(
-        JSON.parse(localStorage.getItem(GRAPHICS_STORAGE_KEY) || 'null'),
-      );
-    } catch {
-      graphicsRef.current = { ...defaultGraphics };
+    // Old public-site experiments must not override the published look.
+    if (import.meta.env.DEV) {
+      try {
+        graphicsRef.current = normalizeGraphics(
+          JSON.parse(localStorage.getItem(GRAPHICS_STORAGE_KEY) || 'null'),
+        );
+      } catch {
+        graphicsRef.current = { ...defaultGraphics };
+      }
+      setGraphicsSettings(graphicsRef.current);
     }
-    setGraphicsSettings(graphicsRef.current);
     setSettings(preferences);
     setReduced(motion);
     const audio = createGarageSound(setAudioState);
@@ -179,13 +188,6 @@ export default function Garage({ projects, articles }: Props) {
   useEffect(() => {
     controls.current?.setGraphics(effectiveGraphics);
   }, [effectiveGraphics]);
-  useEffect(() => {
-    if (!graphicsOpen || failed) return;
-    const frame = requestAnimationFrame(() =>
-      focusUiElement(root.current?.querySelector<HTMLElement>('.garage-graphics-panel button')),
-    );
-    return () => cancelAnimationFrame(frame);
-  }, [graphicsOpen, failed]);
   useEffect(() => {
     controls.current?.setReduced(reduced);
   }, [reduced]);
@@ -285,6 +287,7 @@ export default function Garage({ projects, articles }: Props) {
     return () => window.removeEventListener('keydown', key, true);
   }, [entry, menu, using, inspect, graphicsOpen]);
   const changeGraphics = (next: GraphicsSettings) => {
+    if (!import.meta.env.DEV) return;
     const value = normalizeGraphics(next);
     graphicsRef.current = value;
     setGraphicsPreview(null);
@@ -427,13 +430,15 @@ export default function Garage({ projects, articles }: Props) {
             )}
           </>
         )}
-        {graphicsOpen && !failed && (
-          <GraphicsPanel
-            settings={graphicsSettings}
-            onChange={changeGraphics}
-            onPreview={setGraphicsPreview}
-            onClose={closeGraphics}
-          />
+        {DevGraphicsPanel && graphicsOpen && !failed && (
+          <Suspense fallback={null}>
+            <DevGraphicsPanel
+              settings={graphicsSettings}
+              onChange={changeGraphics}
+              onPreview={setGraphicsPreview}
+              onClose={closeGraphics}
+            />
+          </Suspense>
         )}
         {(entry || menu || failed) && !inspect && !graphicsOpen && (
           <div
@@ -531,16 +536,18 @@ export default function Garage({ projects, articles }: Props) {
                       Walk outside <span>↗</span>
                     </button>
                   </div>
-                  <button
-                    className="garage-graphics-open"
-                    disabled={capturePending}
-                    onClick={() => {
-                      controls.current?.pause();
-                      setGraphicsOpen(true);
-                    }}
-                  >
-                    Graphics &amp; display <span>Adjust the look ↗</span>
-                  </button>
+                  {DevGraphicsPanel && (
+                    <button
+                      className="garage-graphics-open"
+                      disabled={capturePending}
+                      onClick={() => {
+                        controls.current?.pause();
+                        setGraphicsOpen(true);
+                      }}
+                    >
+                      Graphics &amp; display <span>Local development ↗</span>
+                    </button>
+                  )}
                   <div className="garage-audio-settings">
                     <label>
                       Music
