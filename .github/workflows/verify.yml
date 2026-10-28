@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       deployment:
-        description: Publish a preview version or update the live site
+        description: Publish a Pages preview or update the live site
         type: choice
         options: [preview, production]
         default: preview
@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: portfolio-${{ github.ref }}
+  group: portfolio-${{ github.event_name == 'workflow_dispatch' && inputs.deployment == 'preview' && 'pages-preview' || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -46,7 +46,7 @@ jobs:
             playwright-report/
           retention-days: 3
           if-no-files-found: ignore
-      - name: Publish tested build
+      - name: Publish tested build to Pages
         if: >-
           github.ref == 'refs/heads/main' &&
           vars.CLOUDFLARE_DEPLOY_ENABLED == 'true' &&
@@ -56,7 +56,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      - name: Publish tested preview
+      - name: Publish tested Pages preview
         if: >-
           github.event_name == 'workflow_dispatch' &&
           inputs.deployment == 'preview' &&

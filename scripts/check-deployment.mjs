@@ -34,7 +34,7 @@ async function files(directory) {
   ).flat();
 }
 const paths = await files(root);
-assert(paths.length <= 20_000, 'Cloudflare Free allows 20,000 static files per version.');
+assert(paths.length <= 20_000, 'Cloudflare Pages Free allows 20,000 static files per deployment.');
 let bytes = 0;
 for (const path of paths) {
   const info = await stat(path);

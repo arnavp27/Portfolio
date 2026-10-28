@@ -2,6 +2,8 @@
 
 My portfolio as a walkable garage on an imagined Koramangala street. Enter, look around, and use the two old computers to explore my work and projects. Built with Astro, React, TypeScript and Three.js.
 
+[Visit the garage](https://arnavpatil.pages.dev/)
+
 ![The garage at night](docs/preview.webp)
 
 ## Run locally
@@ -38,7 +40,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-The browser suite starts its own preview on port 4179. CI installs dependencies from the lockfile, runs verification and checks entry, menu/PC interaction, asset loading, redirects and mobile reading. Browser traces and reports are local generated files. Once deployment is enabled, successful checks on `main` publish that same build to Cloudflare. See the [deployment guide](docs/deployment.md).
+The browser suite starts its own preview on port 4179. CI installs dependencies from the lockfile, runs verification and checks entry, menu/PC interaction, asset loading, redirects and mobile reading. Browser traces and reports are local generated files. Once deployment is enabled, successful checks on `main` publish that same build to Cloudflare Pages. See the [deployment guide](docs/deployment.md).
 
 ## Structure and content
 
