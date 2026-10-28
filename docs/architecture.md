@@ -43,4 +43,4 @@ Historical implementations, research notes and original source media are outside
 
 ## Hosting
 
-`npm run build` emits `dist/`. `/camera-workshop/` redirects to `/`; `/work/`, `/work/<slug>/`, `/resume/` and published `/notes/` routes remain ordinary static pages. The current asset paths assume a domain root. A GitHub Pages project subpath would need a deliberate base-path change before deployment. CI verifies pull requests; successful pushes to `main` publish the same tested `dist/` build to Cloudflare Pages. See the [deployment guide](deployment.md) for configuration, manual previews and rollback.
+`npm run build` emits `dist/`. `/camera-workshop/` redirects to `/`; `/work/`, `/work/<slug>/`, `/resume/` and published `/notes/` routes remain ordinary static pages. Asset paths and public metadata target the domain root at `https://arnavpatil.pages.dev/`. CI verifies pull requests; successful pushes to `main` publish the same tested `dist/` build to Cloudflare Pages. See the [deployment guide](deployment.md) for configuration, publishing and rollback.

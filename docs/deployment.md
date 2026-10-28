@@ -16,7 +16,7 @@ In the personal `arnavp27/Portfolio` GitHub repository, set these Actions variab
 - `CLOUDFLARE_ACCOUNT_ID`: the personal Cloudflare account ID.
 - `CLOUDFLARE_DEPLOY_ENABLED`: `true` once the Pages project, deployment secret and live URL are configured.
 
-Store `CLOUDFLARE_API_TOKEN` in Actions **secrets**, never in source or a public variable. Scope it to the personal Cloudflare account with **Account → Cloudflare Pages → Edit**. Workers Scripts permission alone does not authorize Pages deployments. The repository does not need visitors' credentials or any runtime API key.
+Store `CLOUDFLARE_API_TOKEN` in Actions **secrets**, never in source or a public variable. Scope it to the personal Cloudflare account with **Account → Cloudflare Pages → Edit**. The repository does not need visitors' credentials or any runtime API key.
 
 For local builds, export `PUBLIC_SITE_URL` in the shell before building and publishing. Unconfigured builds remain usable locally but omit public canonical URLs and disallow indexing. The publish command checks that this origin matches the built site. This configuration is public, not a credential:
 
@@ -32,16 +32,15 @@ Use the standard Ubuntu GitHub runner with this public repository. No larger run
 
 Push to `main` using the personal GitHub SSH remote. The workflow installs locked dependencies, checks formatting and types, runs contracts, builds once, then runs the browser suite against `dist/`. Only after all checks pass does it upload that same directory to Pages with `--branch main`. Pull requests only verify. Production publications are serialized to avoid overlapping releases.
 
-For a preview, manually run **Verify and publish**, select the branch and choose **preview**. It publishes to the non-production `preview` branch, giving a unique deployment URL and updating `preview.arnavpatil.pages.dev`. The fixed preview branch keeps a manual preview of `main` from changing production. Preview publications share a concurrency group so they cannot overlap. Select only trusted branches: a manual preview executes that branch's deployment code with the account's publishing token. Pull requests do not receive this token. A manual **production** run is restricted to `main`.
+To republish, manually run **Verify and publish** on `main`. Manual runs on other branches are skipped. There is one publishing destination: `https://arnavpatil.pages.dev/`.
 
-Local commands, after an authenticated Wrangler session and a build using the public origin:
+For a local release after an authenticated Wrangler session and the verification commands above:
 
 ```sh
-npm run check:deploy
-npm run deploy:preview
+npm run deploy
 ```
 
-`npm run deploy` updates the live site. Neither publish command rebuilds: they validate and upload the existing tested `dist/`. Pinning Wrangler in the lockfile keeps local and CI behavior aligned.
+This command validates and uploads the existing tested `dist/`; it does not rebuild. It always targets the `arnavpatil` Pages project's `main` production branch. Pinning Wrangler in the lockfile keeps local and CI behavior aligned. `npm run preview` only serves the build on localhost for development and browser tests; it never publishes a website.
 
 ## Caching and routes
 
@@ -57,12 +56,9 @@ Keep the authored 60% render scale and effects during baseline comparisons. Reco
 
 ## Rollback
 
-In the Pages project's **Deployments** list, find a previously successful production deployment and choose **Rollback to this deployment** from its actions menu. Preview deployments cannot be used as rollback targets. Then revert the problematic Git commit and push the revert so GitHub and production agree. Avoid unrelated pushes until the fix is ready, because successful `main` pushes publish automatically.
-
-The earlier `arnav-garage` Worker remains available as a separate backup at `https://arnav-garage.thearnavpatil27.workers.dev/`. The Pages workflow does not update or delete it; it retains the last build published there. Current canonical URLs and shared links use the Pages address.
+In the Pages project's **Deployments** list, find a previously successful production deployment and choose **Rollback to this deployment** from its actions menu. Then revert the problematic Git commit and push the revert so GitHub and production agree. Avoid unrelated pushes until the fix is ready, because successful `main` pushes publish automatically.
 
 ## Cloudflare references
 
 - [Direct Upload with continuous integration](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/)
-- [Preview deployments](https://developers.cloudflare.com/pages/configuration/preview-deployments/)
 - [Rollbacks](https://developers.cloudflare.com/pages/configuration/rollbacks/)

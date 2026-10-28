@@ -56,4 +56,4 @@ See the [architecture guide](docs/architecture.md), [content editing guide](docs
 
 Earlier designs, original photos, research notes and working artwork are archived outside this repository. The repository contains the current garage and its reading pages. The garage is fictional; Kazam content is a public work account, without its internal application, logs or source data.
 
-The generated site assumes hosting at a domain root. Hosting under a repository subpath needs a base-path adjustment before deployment. Third-party asset licenses are documented separately; an open-source license for the project's own code has not been selected.
+The site is published at `https://arnavpatil.pages.dev/` through the single Pages deployment workflow. Third-party asset licenses are documented separately; an open-source license for the project's own code has not been selected.
