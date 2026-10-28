@@ -1,7 +1,7 @@
 /* Shared frame for the live 3D garage and its no-JavaScript fallback. */
 @font-face {
   font-family: Pixel;
-  src: url('/assets/fonts/pixelify-sans.ttf') format('truetype');
+  src: url('/assets/fonts/pixelify-sans.woff2') format('woff2');
   font-display: swap;
 }
 body.is-immersive {

@@ -1040,3 +1040,43 @@
 .computer-surface[data-compact='true'] .personal-desktop .os-wallpaper {
   padding-left: 150px;
 }
+
+/* Keep the desktop proportions; touch users need room for a fingertip. */
+@media (pointer: coarse) {
+  .computer-surface[data-compact='true'] .os-window-menuline,
+  .computer-surface[data-compact='true'] .os-window-status {
+    display: none;
+  }
+  .computer-surface[data-compact='true'] .os-titlebar {
+    height: 48px;
+  }
+  .computer-surface[data-compact='true'] .os-titlebar button {
+    width: 44px;
+    height: 44px;
+  }
+  .computer-surface[data-compact='true'] .os-workspace {
+    bottom: 50px;
+  }
+  .computer-surface[data-compact='true'] .os-taskbar {
+    height: 50px;
+  }
+  .computer-surface[data-compact='true'] .os-start,
+  .computer-surface[data-compact='true'] .os-running-apps,
+  .computer-surface[data-compact='true'] .os-running-apps > button {
+    height: 44px;
+  }
+  .computer-surface[data-compact='true'] .os-running-apps {
+    overflow-x: auto;
+  }
+  .computer-surface[data-compact='true'] .os-running-apps > button {
+    min-width: 44px;
+  }
+  .computer-surface[data-compact='true'] .os-start-menu {
+    bottom: 49px;
+    max-height: calc(100% - 50px);
+    overflow-y: auto;
+  }
+  .computer-surface[data-compact='true'] .os-start-menu button {
+    min-height: 44px;
+  }
+}

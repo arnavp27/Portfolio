@@ -7,6 +7,8 @@ import { computers, type ComputerId } from './computers';
 import { createGaragePower } from './power';
 import { createFoliage } from './foliage';
 import { buildCourtyard } from './environment';
+import { createCityMaterials } from './city/materials';
+import { DisposableSet, loadTogether } from './loading';
 type P = [number, number, number];
 export type RoomAction =
   | 'kazam'
@@ -22,11 +24,51 @@ export type RoomAction =
   | 'projects-keyboard';
 
 export async function buildCameraRoom(scene: T.Scene) {
+  const resources = createRoomResources(scene);
+  try {
+    return await assembleCameraRoom(scene, resources);
+  } catch (error) {
+    resources.dispose();
+    throw error;
+  }
+}
+
+function createRoomResources(scene: T.Scene) {
+  const existing = new Set(scene.children);
   const root = new T.Group();
   scene.add(root);
-  const maps = new Set<T.Texture>(),
-    mats = new Set<T.Material>(),
-    geos = new Set<T.BufferGeometry>();
+  const maps = new DisposableSet<T.Texture>(),
+    mats = new DisposableSet<T.Material>(),
+    geos = new DisposableSet<T.BufferGeometry>();
+  let disposed = false;
+  return {
+    root,
+    maps,
+    mats,
+    geos,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      geos.dispose();
+      mats.dispose();
+      maps.dispose();
+      for (const object of [...scene.children]) {
+        if (existing.has(object)) continue;
+        object.traverse((child) => {
+          if (child instanceof T.Light && 'shadow' in child)
+            (child as T.SpotLight).shadow?.dispose();
+        });
+        object.removeFromParent();
+      }
+    },
+  };
+}
+
+async function assembleCameraRoom(
+  scene: T.Scene,
+  resources: ReturnType<typeof createRoomResources>,
+) {
+  const { root, maps, mats, geos } = resources;
   const materialsByColor = new Map<string, T.MeshStandardMaterial>();
   const mat = (color: string, roughness = 0.9, metalness = 0) => {
     const key = color + '/' + roughness + '/' + metalness;
@@ -59,7 +101,7 @@ export async function buildCameraRoom(scene: T.Scene) {
       );
     });
   const pbr = async (name: string, repeat: [number, number] = [1, 1]) => {
-    const ts = await Promise.all(
+    const ts = await loadTogether(
       ['Diffuse', 'nor_gl', 'Rough'].map((channel) =>
         image(`/assets/garage/textures/${name}-${channel}.jpg`),
       ),
@@ -79,11 +121,56 @@ export async function buildCameraRoom(scene: T.Scene) {
     mats.add(m);
     return m;
   };
-  const [floorPbr, wallPbr, tablePbr] = await Promise.all([
-    pbr('wood_floor_worn', [2.2, 2.8]),
-    pbr('yellow_plaster', [2, 1]),
-    pbr('wood_table_worn'),
-  ]);
+  const loader = new GLTFLoader();
+  async function loadModel(id: string) {
+    const gltf = await loader.loadAsync(`/assets/garage/models/${id}/${id}.gltf`);
+    gltf.scene.traverse((object) => {
+      if (!(object instanceof T.Mesh)) return;
+      object.castShadow = true;
+      object.receiveShadow = true;
+      geos.add(object.geometry);
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        mats.add(material);
+        const standard = material as T.MeshStandardMaterial;
+        standard.roughness = Math.max(0.5, standard.roughness);
+        for (const value of Object.values(material))
+          if (value instanceof T.Texture) {
+            value.anisotropy = 8;
+            maps.add(value);
+          }
+      }
+    });
+    return gltf.scene;
+  }
+  // Downloads are independent; keep assembly below in its authored order once all are ready.
+  // Resource ownership remains active after a failure so late arrivals are safely released.
+  const [[floorPbr, wallPbr, tablePbr], outdoorMaterials, models, photos] = await loadTogether(
+    [
+      loadTogether([
+        pbr('wood_floor_worn', [2.2, 2.8]),
+        pbr('yellow_plaster', [2, 1]),
+        pbr('wood_table_worn'),
+      ]),
+      createCityMaterials({ maps, mats, mat }),
+      loadTogether([
+        loadModel('metal_office_desk'),
+        loadModel('GreenChair_01'),
+        loadModel('desk_lamp_arm_01'),
+        loadModel('wooden_bookshelf_worn'),
+      ]),
+      loadTogether(
+        ['sdi-presenting', 'sdi-finals', 'sdi-jury'].map((name) =>
+          image(`/assets/images/${name}.webp`),
+        ),
+      ),
+      loadTogether([
+        document.fonts.load('32px Kannada'),
+        document.fonts.load('32px Plex'),
+        document.fonts.load('32px Pixel'),
+      ]),
+    ],
+    90_000,
+  );
   const wood = tablePbr;
   wood.color.set('#b6a891');
   const plaster = wallPbr;
@@ -275,19 +362,23 @@ export async function buildCameraRoom(scene: T.Scene) {
   box([0, -0.02, 3.4], [5.4, 0.14, 0.5], mat('#797767'));
   // The real window opens onto a neighbouring courtyard and balcony.
   const indoorObjects = new Set(root.children);
-  const outdoors = await buildCourtyard(scene, {
-    root,
-    mat,
-    texture,
-    mesh,
-    box,
-    cyl,
-    plane,
-    beam,
-    mats,
-    geos,
-    maps,
-  });
+  const outdoors = buildCourtyard(
+    scene,
+    {
+      root,
+      mat,
+      texture,
+      mesh,
+      box,
+      cyl,
+      plane,
+      beam,
+      mats,
+      geos,
+      maps,
+    },
+    outdoorMaterials,
+  );
   for (const child of root.children)
     if (!indoorObjects.has(child))
       child.traverse((o) => {
@@ -325,10 +416,7 @@ export async function buildCameraRoom(scene: T.Scene) {
   mats.add(rugMat);
   plane([0.45, 0.002, 0.02], 1.65, 3.8, rugMat, root, [-Math.PI / 2, 0, 0]);
   // Reusable real 3D furniture. Dimensions are normalized once, not guessed per camera.
-  const loader = new GLTFLoader();
-  async function model(id: string, p: P, height: number, rotation = 0) {
-    const gltf = await loader.loadAsync(`/assets/garage/models/${id}/${id}.gltf`),
-      g = gltf.scene;
+  function model(g: T.Group, p: P, height: number, rotation = 0) {
     const bounds = new T.Box3().setFromObject(g),
       size = bounds.getSize(new T.Vector3()),
       center = bounds.getCenter(new T.Vector3());
@@ -337,31 +425,12 @@ export async function buildCameraRoom(scene: T.Scene) {
     const outer = group(p, rotation);
     outer.scale.setScalar(height / size.y);
     outer.add(g);
-    g.traverse((o) => {
-      if (o instanceof T.Mesh) {
-        o.castShadow = true;
-        o.receiveShadow = true;
-        geos.add(o.geometry);
-        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
-          mats.add(m);
-          const standard = m as T.MeshStandardMaterial;
-          standard.roughness = Math.max(0.5, standard.roughness);
-          for (const value of Object.values(m))
-            if (value instanceof T.Texture) {
-              value.anisotropy = 8;
-              maps.add(value);
-            }
-        }
-      }
-    });
     return outer;
   }
-  const [desk, chair, deskLamp, bookcase] = await Promise.all([
-    model('metal_office_desk', [-1.35, 0, 0.83], 0.81),
-    model('GreenChair_01', [-1.93, 0, 1.95], 1.04, Math.PI + 0.72),
-    model('desk_lamp_arm_01', [-2.11, 0.85, 0.59], 1.0, Math.PI + 0.3),
-    model('wooden_bookshelf_worn', [2.32, 0, -1.62], 1.95, -Math.PI / 2),
-  ]);
+  const desk = model(models[0], [-1.35, 0, 0.83], 0.81),
+    chair = model(models[1], [-1.93, 0, 1.95], 1.04, Math.PI + 0.72),
+    deskLamp = model(models[2], [-2.11, 0.85, 0.59], 1.0, Math.PI + 0.3),
+    bookcase = model(models[3], [2.32, 0, -1.62], 1.95, -Math.PI / 2);
   desk.name = 'work-desk';
   chair.name = 'foreground-chair';
   deskLamp.name = 'articulated-lamp';
@@ -646,11 +715,6 @@ export async function buildCameraRoom(scene: T.Scene) {
     );
   }
 
-  const photos = await Promise.all(
-    ['sdi-presenting', 'sdi-finals', 'sdi-jury'].map((name) =>
-      image(`/assets/images/${name}.webp`),
-    ),
-  );
   photos.forEach((photo, i) =>
     print([-0.46 + i * 0.46, 0.2, 0.069], 0.31, 0.25, photo, cork, [0, 0, (i - 1) * 0.035]),
   );
@@ -1037,13 +1101,6 @@ export async function buildCameraRoom(scene: T.Scene) {
         }
       }
     },
-    dispose: () => {
-      geos.forEach((g) => g.dispose());
-      mats.forEach((m) => m.dispose());
-      maps.forEach((t) => t.dispose());
-      scene.traverse((o) => {
-        if (o instanceof T.Light && 'shadow' in o) (o as T.SpotLight).shadow.map?.dispose();
-      });
-    },
+    dispose: resources.dispose,
   };
 }

@@ -23,7 +23,11 @@ const draftId = `${id}-draft`;
 const build = () =>
   run(process.execPath, [cli, 'build'], {
     cwd: fixture,
-    env: { ...process.env, ASTRO_TELEMETRY_DISABLED: '1' },
+    env: {
+      ...process.env,
+      ASTRO_TELEMETRY_DISABLED: '1',
+      PUBLIC_SITE_URL: 'https://portfolio.example.test/',
+    },
     timeout: 120_000,
     maxBuffer: 4 * 1024 * 1024,
   });
@@ -50,6 +54,25 @@ try {
   await build();
   assert((await html()).includes('EXISTING CONTRACT ARTICLE'));
   assert((await html()).includes('href="/notes/"'));
+  const initialHome = await html();
+  assert(initialHome.includes('Read projects'), 'Healthy entry offers the readable project index');
+  assert(initialHome.includes('rel="canonical" href="https://portfolio.example.test/"'));
+  assert(initialHome.includes('property="og:url" content="https://portfolio.example.test/"'));
+  assert(
+    initialHome.includes(
+      'property="og:image" content="https://portfolio.example.test/assets/social/garage.jpg"',
+    ),
+  );
+  assert(initialHome.includes('name="twitter:card" content="summary_large_image"'));
+  assert(
+    !initialHome.includes('name="robots" content="noindex'),
+    'Configured homepage is indexable',
+  );
+  assert(
+    (await html('robots.txt')).includes('Sitemap: https://portfolio.example.test/sitemap.xml'),
+  );
+  assert((await html('404.html')).includes('name="robots" content="noindex, nofollow"'));
+  assert(!(await html('404.html')).includes('rel="canonical"'));
 
   await writeFile(
     projectPath,
@@ -77,6 +100,21 @@ try {
   assert((await html(`notes/${id}/index.html`)).includes('Fixture article body.'));
   assert((await html('notes/index.html')).includes('NEW CONTRACT ARTICLE'));
   await absent(`notes/${draftId}/index.html`);
+  const sitemap = await html('sitemap.xml');
+  assert(sitemap.includes(`<loc>https://portfolio.example.test/work/${id}/</loc>`));
+  assert(sitemap.includes(`<loc>https://portfolio.example.test/notes/${id}/</loc>`));
+  assert(sitemap.includes('<loc>https://portfolio.example.test/notes/</loc>'));
+  assert(!sitemap.includes(draftId), 'Draft writing is also excluded from search discovery');
+  assert(!sitemap.includes('/404'), 'Error pages are excluded from search discovery');
+  assert(
+    !sitemap.includes('/camera-workshop'),
+    'Legacy redirect is excluded from search discovery',
+  );
+  assert(
+    (await html(`work/${id}/index.html`)).includes(
+      `rel="canonical" href="https://portfolio.example.test/work/${id}/"`,
+    ),
+  );
 
   await rm(projectPath);
   await rm(articlePath);
@@ -90,8 +128,12 @@ try {
   );
   await absent(`work/${id}/index.html`);
   await absent(`notes/${id}/index.html`);
+  const restoredSitemap = await html('sitemap.xml');
+  assert(!restoredSitemap.includes(`/work/${id}/`));
+  assert(!restoredSitemap.includes(`/notes/${id}/`));
+  assert(restoredSitemap.includes(`/notes/${existingId}/`));
   console.log(
-    'PASS: isolated content extension, existing published articles, project index/routes, draft exclusion, removed entries, and retained writing navigation.',
+    'PASS: isolated content extension, existing published articles, project index/routes, draft exclusion, removed entries, retained writing navigation, canonical/share metadata, robots, and published-only sitemap.',
   );
 } catch (error) {
   if (error.stdout) process.stderr.write(error.stdout);

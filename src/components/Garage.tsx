@@ -586,6 +586,7 @@ export default function Garage({ projects, articles }: Props) {
                 </div>
               )}
               <div className="garage-contact-links">
+                {entry && !failed && <a href="/work/">Read projects ↗</a>}
                 <a href="/resume/" target="_blank" rel="noreferrer">
                   Résumé ↗
                 </a>

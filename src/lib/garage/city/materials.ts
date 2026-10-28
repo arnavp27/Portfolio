@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneKit } from './types';
+import { loadTogether } from '../loading';
 type SurfaceMaps = { map: THREE.Texture; normalMap: THREE.Texture; roughnessMap: THREE.Texture };
 type Weather = 'wall' | 'paving' | 'asphalt' | 'wood' | 'none';
 
@@ -57,7 +58,7 @@ function weather(material: THREE.MeshStandardMaterial, kind: Weather) {
   return material;
 }
 
-export async function createCityMaterials(kit: SceneKit) {
+export async function createCityMaterials(kit: Pick<SceneKit, 'maps' | 'mats' | 'mat'>) {
   const loader = new THREE.TextureLoader();
   const definitions = {
     plaster: ['painted_plaster_wall', 2],
@@ -68,9 +69,9 @@ export async function createCityMaterials(kit: SceneKit) {
     wood: ['dark_wood', 2],
     bark: ['bark_brown_02', 1],
   } as const;
-  const entries = await Promise.all(
+  const entries = await loadTogether(
     Object.entries(definitions).map(async ([key, [name, metres]]) => {
-      const channels = await Promise.all(
+      const channels = await loadTogether(
         ['Diffuse', 'nor_gl', 'Rough'].map(async (channel, index) => {
           const texture = await loader.loadAsync(`/assets/garage/surfaces/${name}-${channel}.jpg`);
           texture.colorSpace = index === 0 ? THREE.SRGBColorSpace : THREE.NoColorSpace;

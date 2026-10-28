@@ -15,3 +15,8 @@ coverage/
 versions/
 SDI/
 art-source/
+
+# Cloudflare local state and development secrets
+.wrangler/
+.dev.vars
+.dev.vars.*

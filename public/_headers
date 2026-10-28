@@ -1,0 +1,8 @@
+# HTML and stable /assets/ URLs retain Cloudflare's ETag revalidation defaults.
+# Only content-hashed build output can safely remain immutable across updates.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable

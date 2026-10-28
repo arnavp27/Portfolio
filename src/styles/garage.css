@@ -1,6 +1,6 @@
 @font-face {
   font-family: Kannada;
-  src: url('/assets/fonts/noto-sans-kannada.ttf') format('truetype');
+  src: url('/assets/fonts/noto-sans-kannada.woff2') format('woff2');
   font-weight: 400;
   font-display: swap;
 }
@@ -181,6 +181,7 @@
 }
 .garage-contact-links {
   display: flex;
+  flex-wrap: wrap;
   gap: 27px;
   font:
     10px Plex,
@@ -810,5 +811,19 @@
   }
   .garage-entry-touch {
     display: block;
+  }
+  .garage-contact-links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .garage-guided button,
+  .garage .computer-step-away {
+    min-height: 44px;
+  }
+  .garage-icon,
+  .garage-pc-sound {
+    width: 44px;
+    height: 44px;
   }
 }

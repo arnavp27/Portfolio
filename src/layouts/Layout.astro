@@ -1,17 +1,23 @@
 ---
 import { getCollection } from 'astro:content';
 import '../styles/global.css';
+import { socialImagePath } from '../lib/site';
 interface Props {
   title?: string;
   description?: string;
   immersive?: boolean;
+  noindex?: boolean;
 }
 const {
   title = 'Arnav Patil — AI / ML engineer, Bengaluru',
   description = 'AI, machine learning, and things I’ve built. Currently at Kazam in Bengaluru.',
   immersive = false,
+  noindex = false,
 } = Astro.props;
 const articles = await getCollection('articles', ({ data }) => !data.draft);
+const canonical = Astro.site && !noindex ? new URL(Astro.url.pathname, Astro.site).href : undefined;
+const socialImage = Astro.site ? new URL(socialImagePath, Astro.site).href : undefined;
+const socialImageAlt = 'Arnav’s garage at night on a Bengaluru street.';
 ---
 
 <!doctype html>
@@ -24,13 +30,31 @@ const articles = await getCollection('articles', ({ data }) => !data.draft);
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Arnav’s garage" />
+    {(noindex || !Astro.site) && <meta name="robots" content="noindex, nofollow" />}
+    {canonical && <link rel="canonical" href={canonical} />}
+    {canonical && <meta property="og:url" content={canonical} />}
+    {socialImage && (
+      <>
+        <meta property="og:image" content={socialImage} />
+        <meta property="og:image:type" content="image/jpeg" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:image:alt" content={socialImageAlt} />
+      </>
+    )}
+    <meta name="twitter:card" content={socialImage ? 'summary_large_image' : 'summary'} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    {socialImage && <meta name="twitter:image" content={socialImage} />}
+    {socialImage && <meta name="twitter:image:alt" content={socialImageAlt} />}
     <title>{title}</title>
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
     <link
       rel="preload"
-      href="/assets/fonts/instrument-sans.ttf"
+      href="/assets/fonts/instrument-sans.woff2"
       as="font"
-      type="font/ttf"
+      type="font/woff2"
       crossorigin
     />
     <slot name="head" />

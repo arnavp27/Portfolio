@@ -38,7 +38,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-The browser suite starts its own preview on port 4179. CI installs dependencies from the lockfile, runs verification and checks entry, menu/PC interaction, asset loading, redirects and mobile reading. Browser traces and reports are local generated files. CI does not deploy or publish the site.
+The browser suite starts its own preview on port 4179. CI installs dependencies from the lockfile, runs verification and checks entry, menu/PC interaction, asset loading, redirects and mobile reading. Browser traces and reports are local generated files. Once deployment is enabled, successful checks on `main` publish that same build to Cloudflare. See the [deployment guide](docs/deployment.md).
 
 ## Structure and content
 

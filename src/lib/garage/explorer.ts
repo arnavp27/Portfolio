@@ -2,6 +2,7 @@ import * as T from 'three';
 import { createGarageRendering } from './rendering';
 import { defaultGraphics, normalizeGraphics, type GraphicsSettings } from './graphics-settings';
 import { buildCameraRoom, type RoomAction } from './world';
+import { loadTogether } from './loading';
 import { createHands } from './hands';
 import {
   screenDimensions,
@@ -290,12 +291,32 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
   }
   densityQuery.addEventListener('change', densityChanged);
   resize();
-  Promise.all([buildCameraRoom(scene), graphics.ready])
+  let pendingWorld: typeof world;
+  let startupFailed = false;
+  const startupAbort = new AbortController();
+  function disposeWorld() {
+    startupAbort.abort();
+    pendingWorld?.dispose();
+    pendingWorld = undefined;
+    world?.dispose();
+    world = undefined;
+  }
+  loadTogether(
+    [
+      buildCameraRoom(scene).then((result) => {
+        // Own the room as soon as it arrives, even while its lighting is pending.
+        if (disposed || startupFailed) result.dispose();
+        else pendingWorld = result;
+        return result;
+      }),
+      graphics.ready,
+    ],
+    90_000,
+    startupAbort.signal,
+  )
     .then(([result]) => {
-      if (disposed) {
-        result.dispose();
-        return;
-      }
+      if (disposed || startupFailed) return;
+      pendingWorld = undefined;
       world = result;
       graphics.prepare();
       world.setRain(graphicsSettings.rain);
@@ -303,8 +324,11 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
       wake();
     })
     .catch((error) => {
+      if (disposed) return;
+      startupFailed = true;
+      disposeWorld();
       console.error('Garage load failed', error);
-      if (!disposed) options.onError('load');
+      options.onError('load');
     });
   function actionHit(x = 0, y = 0, limit = 2.65) {
     if (!world || phase !== 'room' || paused || !entered) return null;
@@ -834,7 +858,7 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
       document.removeEventListener('visibilitychange', visibility);
       renderer.domElement.removeEventListener('webglcontextlost', lost);
       hands.dispose();
-      world?.dispose();
+      disposeWorld();
       graphics.dispose();
       renderer.dispose();
       renderer.domElement.remove();
