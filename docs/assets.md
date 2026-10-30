@@ -1,6 +1,6 @@
 # Asset sources and rights
 
-The repository contains optimized runtime assets. Original photographs, research documents, earlier designs and image-generation working files are retained separately outside this tree.
+The repository contains optimized runtime assets. Original photographs, research documents, earlier designs and image-generation working files are retained separately outside this tree. The small HDRI used to regenerate the night sky is retained in `assets-source/garage/`, outside the deployed `public/` directory.
 
 ## Models and materials
 
@@ -19,6 +19,8 @@ The following models and their textures come from [Poly Haven](https://polyhaven
 Furniture and interior material JPEGs use coefficient-preserving Huffman optimization (`jpegtran -copy all -optimize`). Their dimensions, metadata and decoded pixels are unchanged. Exterior maps that did not shrink were left untouched.
 
 The exterior paving, dark wood, bark, asphalt, brick, plaster, roof tiles and sky environment are also Poly Haven CC0 assets. [material-sources.json](material-sources.json) records their original download URLs, source checksums and local SHA-256 hashes. Optimized files and maps live in `public/assets/garage/surfaces/` and `textures/`. The street layout, houses, vehicles, vegetation meshes and room props are authored in the project.
+
+The sky asset `night-sky.rgba16f.bin` is generated with `node scripts/generate-night-sky.mjs`. Its gzip-compressed RGBA16F payload preserves every half-float word from the original HDRLoader and night-grading calculation, including alpha. The browser decompresses those bytes with its native `DecompressionStream` and uses the same texture orientation, filtering, color space and runtime PMREM processing. Browsers without that API lazily load Three.js's bundled gzip decoder, preserving the same sky without an additional package dependency. Both paths validate the payload before texture creation; the fallback also bounds its output and verifies the gzip checksum. [Source and binary format details](../assets-source/garage/README.md) explain reproducibility; the source HDRI is not deployed. Invalid sky data rejects loading so the renderer can use its existing lighting fallback.
 
 ## Fonts, images and personal content
 

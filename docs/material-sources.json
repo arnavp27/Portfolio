@@ -3,9 +3,13 @@
     "asset": "kloofendal_overcast_puresky",
     "channel": "hdri",
     "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloofendal_overcast_puresky_1k.hdr",
-    "file": "kloofendal_overcast_puresky-hdri.hdr",
+    "file": "night-sky.rgba16f.bin",
     "sourceMd5": "d5c53f6432193893e7dc17eb65e67409",
-    "localSha256": "5f98aa01d43a49cd899299751a978b3e5559a76300198b5dd2d9c68ecc4ad130"
+    "localSha256": "f333098cd850b66ca5ab2cb945dbbff32fd4fe4ea77233a26880d3ca35e7a462",
+    "sourceFile": "assets-source/garage/kloofendal_overcast_puresky_1k.hdr",
+    "sourceSha256": "5f98aa01d43a49cd899299751a978b3e5559a76300198b5dd2d9c68ecc4ad130",
+    "decodedSha256": "f4df21aeec3e424fd67d2e56dd9db08b4e5df4df49e6fe8fd7d5dcaa94c69617",
+    "generator": "node scripts/generate-night-sky.mjs"
   },
   {
     "asset": "rectangular_paving",

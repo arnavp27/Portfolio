@@ -10,6 +10,8 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
+    // Use the full browser's native Escape/capture lifecycle, including headless runs.
+    channel: 'chromium',
     baseURL: 'http://127.0.0.1:4179',
     viewport: { width: 1280, height: 720 },
     trace: 'retain-on-failure',

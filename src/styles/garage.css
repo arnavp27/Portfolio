@@ -770,14 +770,6 @@
   }
 }
 
-/* Capture failures remain in the pause menu; free exploration never uses a free cursor. */
-.garage-capture-help {
-  margin: 13px 0 0;
-  color: #d1c8ae;
-  font:
-    11px/1.7 Plex,
-    monospace;
-}
 .garage .computer-layer[hidden] {
   display: none;
 }

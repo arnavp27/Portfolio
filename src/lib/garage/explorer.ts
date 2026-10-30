@@ -42,13 +42,13 @@ export type ExplorerState = {
   power: ExplorerPower;
 };
 export type ExplorerControls = {
-  start: () => void;
+  start: () => boolean;
   pause: () => void;
-  resume: () => void;
-  useComputer: (id: ComputerId) => void;
+  resume: () => boolean;
+  useComputer: (id: ComputerId) => boolean;
   leaveComputer: () => void;
   interact: () => void;
-  walkTo: (id: keyof typeof destinations) => void;
+  walkTo: (id: keyof typeof destinations) => boolean;
   setReduced: (value: boolean) => void;
   setGraphics: (settings: GraphicsSettings) => void;
   dispose: () => void;
@@ -61,6 +61,7 @@ type Options = {
   onState: (state: ExplorerState) => void;
   onComputerState: (state: ComputerState) => void;
   onInspect: () => void;
+  onPause: () => void;
 };
 export function mountExplorer(container: HTMLElement, options: Options): ExplorerControls {
   // Geometry is antialiased in the postprocessing buffers, not the default framebuffer.
@@ -125,8 +126,8 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
   const escape = createEscapeController(),
     jump = createJumpMotion(),
     finePointer = matchMedia('(pointer: fine)');
-  // Play intent is independent of browser capture. Pending requests keep the menu
-  // open; only a native grant can resume desktop gameplay.
+  // Play intent is independent of browser capture. Desktop gameplay stays
+  // suspended until a native grant; the UI handles capture progress and recovery.
   let playRequested = false,
     captureStatus: PointerCaptureStatus = 'idle',
     windowFocused = true;
@@ -206,7 +207,8 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
       clearInput();
       target = null;
       finishComputerReturn();
-      // Retain the failure status for the menu's click-to-retry message. A late
+      options.onPause();
+      // Retain failure status without stealing focus from the menu's Resume button. A late
       // grant is rejected by isAllowed because play intent is now false.
     }
     emit();
@@ -247,17 +249,18 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
     // This must cancel even when already paused and awaiting capture.
     unlock();
     finishComputerReturn();
+    options.onPause();
     emit();
     wake();
   }
   function resume() {
-    if (!entered || (phase !== 'room' && phase !== 'leaving')) return;
+    if (!entered || (phase !== 'room' && phase !== 'leaving')) return false;
     clearInput();
-    container.focus({ preventScroll: true });
     void options.sound.start();
     if (guided) {
       unlock();
       paused = false;
+      container.focus({ preventScroll: true });
     } else {
       playRequested = true;
       paused = true;
@@ -267,6 +270,7 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
     }
     emit();
     wake();
+    return guided || playRequested;
   }
   function resize() {
     width = Math.max(1, container.clientWidth);
@@ -305,22 +309,28 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
   }
   loadTogether(
     [
-      buildCameraRoom(scene).then((result) => {
-        // Own the room as soon as it arrives, even while its lighting is pending.
-        if (disposed || startupFailed) result.dispose();
-        else pendingWorld = result;
+      Promise.all([
+        buildCameraRoom(scene).then((result) => {
+          // Own the room as soon as it arrives, including while shaders are pending.
+          if (disposed || startupFailed) result.dispose();
+          else pendingWorld = result;
+          return result;
+        }),
+        graphics.ready,
+      ]).then(async ([result]) => {
+        if (disposed || startupFailed) return;
+        graphics.prepare();
+        await graphics.compile();
         return result;
       }),
-      graphics.ready,
     ],
     90_000,
     startupAbort.signal,
   )
     .then(([result]) => {
-      if (disposed || startupFailed) return;
+      if (!result || disposed || startupFailed) return;
       pendingWorld = undefined;
       world = result;
-      graphics.prepare();
       world.setRain(graphicsSettings.rain);
       renderer.shadowMap.needsUpdate = true;
       wake();
@@ -398,10 +408,10 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
     wake();
   }
   function useComputer(id: ComputerId) {
-    if (!ready || phase !== 'room' || !world?.isComputerOn(id)) return;
+    if (!ready || phase !== 'room' || !world?.isComputerOn(id)) return false;
     const to = computerPose(id, width, height).position,
       next = walkingPath({ x: player.x, z: player.z }, { x: to.x, z: to.z });
-    if (!next.length) return;
+    if (!next.length) return false;
     paused = false;
     clearInput();
     resetJump();
@@ -421,11 +431,13 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
     unlock();
     options.sound.play('chair');
     wake();
+    return true;
   }
   function finishComputerReturn() {
-    if (phase !== 'leaving') return;
-    // A paused or denied return must still release the computer phase so menu
-    // destinations remain usable. Input stays governed by pause and capture.
+    if (phase === 'room') return;
+    if (phase === 'using') prepareComputerReturn();
+    // Pause can interrupt any computer phase. Settle at the approach origin or
+    // beside a seated desk so the normal menu can always resume exploration.
     focus = 0;
     computer = null;
     path = [];
@@ -433,8 +445,7 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
     view.copy(fromTarget);
     setPhase('room');
   }
-  function leaveComputer() {
-    if (phase === 'room' || phase === 'leaving') return;
+  function prepareComputerReturn() {
     leaveTime = Math.max(1.2, transitionTime * 0.85);
     // Once seated, step back beside that desk; do not retrace a long walk to the courtyard.
     if (phase === 'using' && computer) {
@@ -451,22 +462,24 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
         leaveTime = 1.2;
       }
     }
+  }
+  function leaveComputer() {
+    if (phase === 'room' || phase === 'leaving') return;
+    prepareComputerReturn();
     options.sound.play('chair');
     setPhase('leaving');
     resume();
   }
   function walkTo(id: keyof typeof destinations) {
-    if (!ready || phase !== 'room') return;
-    if (!entered) return;
+    if (!ready || phase !== 'room' || !entered) return false;
     clearInput();
     resetJump();
     target = null;
-    container.focus({ preventScroll: true });
     const goal = destinations[id],
       next = walkingPath({ x: player.x, z: player.z }, goal);
     if (!next.length) {
       emit();
-      return;
+      return false;
     }
     auto = next;
     autoAmount = 0;
@@ -482,7 +495,7 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
           : id === 'solar'
             ? new T.Vector3(2.5, 1.7, 0.5)
             : new T.Vector3(...screenDimensions(id).center);
-    resume();
+    return resume();
   }
   const onLock = () => capture.sync();
   const onLockError = () => capture.fail();
@@ -563,8 +576,9 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
     if (e.defaultPrevented) return;
     if (e.key === 'Escape') {
       const action = escape.keyDown(inputState(), performance.now(), e.repeat);
-      if (!action) return;
+      if (!action && captureStatus !== 'requesting') return;
       e.preventDefault();
+      // Escape cancels an in-flight request; a later resume action may retry.
       if (captureStatus === 'requesting') pause();
       else if (action === 'leave-computer') leaveComputer();
       else if (action === 'pause') pause();
@@ -684,7 +698,7 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
     if (disposed || document.hidden || !world) return;
     const dt = Math.min(0.05, lastTime ? (now - lastTime) / 1000 : 1 / 60);
     lastTime = now;
-    if (!paused && !reduced) elapsed += dt;
+    if (entered && !paused && !reduced) elapsed += dt;
     if (acceptsMovement(inputState())) {
       const previous = player.clone();
       if (auto) {
@@ -795,7 +809,10 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
       ready = true;
       options.onReady();
     }
+    // Keep the ready entry scene still until play starts. wake() can still
+    // redraw it once for resize/settings without creating an idle render loop.
     if (
+      entered &&
       !paused &&
       (phase === 'approaching' ||
         phase === 'leaving' ||
@@ -828,10 +845,10 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
   return {
     setGraphics,
     start: () => {
-      if (!ready) return;
+      if (!ready) return false;
       entered = true;
       guided = !finePointer.matches;
-      resume();
+      return resume();
     },
     resume,
     pause,

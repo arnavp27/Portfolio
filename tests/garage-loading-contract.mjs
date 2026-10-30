@@ -8,6 +8,11 @@ import ts from 'typescript';
 import { computers } from '../src/lib/garage/computers.ts';
 import { createGaragePower } from '../src/lib/garage/power.ts';
 import { random } from '../src/lib/graphics/textures.ts';
+import {
+  cloneBatchGeometry,
+  pruneEmptyStaticGroups,
+  releaseUnusedGeometries,
+} from '../src/lib/garage/geometry-batching.ts';
 
 function production(name, dependencies = {}) {
   const url = new URL(`../src/lib/garage/${name}.ts`, import.meta.url);
@@ -87,7 +92,9 @@ function roomRig({ assemblyError, scene = new THREE.Scene() } = {}) {
     '../graphics/textures': { random, canvasTexture: () => track(new THREE.Texture()) },
     './computers': { computers },
     './power': { createGaragePower },
+    './geometry-batching': { cloneBatchGeometry, pruneEmptyStaticGroups, releaseUnusedGeometries },
     './foliage': {
+      clearFoliageConstructionCache() {},
       createFoliage() {
         if (assemblyError) throw assemblyError;
         return { plant() {}, vine() {} };
@@ -161,6 +168,25 @@ await test('all independent scene asset groups start before any network request 
     assert.equal(world.vehicleCount, 12);
     assert.equal(world.pedestrianCount, 16);
     assert.equal(world.isComputerOn('kazam'), true);
+    const liveGeometry = new Set();
+    rig.scene.traverse((object) => {
+      if (object.geometry) liveGeometry.add(object.geometry);
+    });
+    const loadedGeometry = rig.tracked.filter(({ resource }) => resource.isBufferGeometry);
+    assert(
+      loadedGeometry.some(({ resource }) => !liveGeometry.has(resource)),
+      'The fixture has batched model sources',
+    );
+    assert(
+      loadedGeometry.some(({ resource }) => liveGeometry.has(resource)),
+      'The fixture has a dynamic model',
+    );
+    for (const { resource, disposed } of rig.tracked)
+      assert.equal(
+        disposed,
+        resource.isBufferGeometry && !liveGeometry.has(resource) ? 1 : 0,
+        'Only unused construction geometry is released before teardown',
+      );
     world.dispose();
     assert.deepEqual(rig.scene.children, [rig.existing], 'Only owned scene objects are removed');
     assert(
@@ -301,10 +327,15 @@ await test('late work from a failed attempt cannot remove or dispose a successfu
     const { world, error } = await retry.outcome;
     assert.ifError(error);
     const retryObjects = [...retry.scene.children];
+    const retryDisposals = retry.tracked.map(({ disposed }) => disposed);
     old.resolveAll();
     await flush();
     assert.deepEqual(retry.scene.children, retryObjects);
-    assert(retry.tracked.every(({ disposed }) => disposed === 0));
+    assert.deepEqual(
+      retry.tracked.map(({ disposed }) => disposed),
+      retryDisposals,
+      'Late work cannot release any successful retry resource',
+    );
     assert(
       old.tracked
         .filter(({ resource }) => resource !== failed.value)

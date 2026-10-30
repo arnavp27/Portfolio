@@ -46,45 +46,70 @@ function harness() {
     },
   };
 }
-for (const order of ['key-first', 'lock-first']) {
-  const h = harness();
-  if (order === 'key-first') {
-    assert.equal(h.key(100), 'pause');
-    h.unlock(101);
-  } else {
-    assert.equal(h.unlock(100), 'pause');
-    assert.equal(h.key(101), null);
+for (const phase of ['room', 'leaving']) {
+  for (const order of ['key-first', 'lock-first']) {
+    const h = harness();
+    h.state.phase = phase;
+    if (order === 'key-first') {
+      assert.equal(h.key(100), 'pause');
+      assert.equal(h.unlock(101), null, 'Native release cannot pause an already-paused game');
+    } else {
+      assert.equal(h.unlock(100), 'pause');
+      assert.equal(h.key(101), null);
+    }
+    assert(h.state.paused, `${phase}, ${order}: one Escape pauses once`);
+    assert.equal(h.key(130, true), null);
+    assert(h.state.paused, 'Holding Escape cannot oscillate the menu');
+    h.release();
+    assert.equal(h.key(200), null, 'Desktop Escape never requests fullscreen or capture');
+    assert(h.state.paused, `${phase}, ${order}: the next Escape leaves the menu open`);
   }
-  assert(h.state.paused, `${order}: one Escape pauses once`);
-  assert.equal(h.key(130, true), null);
-  assert(h.state.paused, 'Holding Escape cannot oscillate the menu');
-  h.release();
-  assert.equal(h.key(200), 'resume');
-  assert(!h.state.paused, `${order}: the next Escape closes the menu`);
 }
 {
   const h = harness();
   h.unlock(100);
   h.release();
-  assert.equal(h.key(180), 'resume', 'Native unlock without keydown still allows the next Escape');
-  h.release();
-  h.state.phase = 'using';
-  h.state.paused = false;
+  assert.equal(h.key(180), null, 'Native unlock without keydown still leaves the menu paused');
+  assert(h.state.paused);
+}
+for (const phase of ['approaching', 'using']) {
+  const h = harness();
+  h.state.phase = phase;
   h.state.locked = false;
-  assert.equal(h.key(1000), 'leave-computer');
-  assert.equal(h.captures, 1, 'Exiting a PC requests mouse capture in that user gesture');
+  assert.equal(h.key(100), 'pause', 'Desktop Escape pauses from either computer phase');
+  assert.equal(h.captures, 0, 'Pausing a computer never requests capture');
+  h.release();
+  assert.equal(h.key(200), null, 'A paused desktop computer cannot resume through Escape');
+}
+for (const guided of [false, true]) {
+  const h = harness();
+  h.state.entered = false;
+  h.state.guided = guided;
+  assert.equal(h.key(100), null, 'Escape cannot enter the garage');
+}
+{
+  const h = harness();
+  h.state.guided = true;
+  h.state.locked = false;
+  assert.equal(h.unlock(100), null, 'Guided input does not depend on native pointer capture');
+  assert.equal(h.key(110), 'pause');
+  h.release();
+  assert.equal(h.key(200), 'resume', 'Guided Escape still toggles the menu');
+  h.release();
+  for (const phase of ['approaching', 'using']) {
+    h.state.phase = phase;
+    assert.equal(h.key(300), 'leave-computer', 'Guided Escape still leaves the computer');
+    h.release();
+  }
+  assert.equal(h.captures, 2);
+  assert.equal(h.key(400), null, 'Guided Escape during an active return does not restart it');
+  h.release();
   h.state.paused = true;
-  assert.equal(
-    h.unlock(1001),
-    null,
-    'An already-paused return waiting for capture does not pause again',
-  );
-  h.release();
-  assert.equal(h.key(1200), 'resume', 'Escape can retry a paused return from a computer');
-  h.release();
-  assert.equal(h.key(1300), null, 'Escape during an active return does not restart it');
-  h.release();
-  h.state.phase = 'room';
+  assert.equal(h.key(500), 'resume', 'Guided Escape can resume a paused return');
+}
+{
+  const h = harness();
+  h.state.locked = false;
   assert.equal(lookMode(h.state), 'inactive', 'Desktop mouse look requires actual capture');
   h.state.locked = true;
   assert.equal(lookMode(h.state), 'mouse-look');
@@ -96,20 +121,6 @@ for (const order of ['key-first', 'lock-first']) {
   h.state.guided = false;
   h.state.locked = false;
   assert.equal(lookMode(h.state), 'inactive');
-}
-for (const order of ['key-first', 'lock-first']) {
-  const h = harness();
-  h.state.phase = 'leaving';
-  if (order === 'key-first') {
-    assert.equal(h.key(100), null);
-    assert.equal(h.unlock(101), 'pause');
-  } else {
-    assert.equal(h.unlock(100), 'pause');
-    assert.equal(h.key(101), null);
-  }
-  assert(h.state.paused, 'Losing capture while returning pauses the camera transition');
-  h.release();
-  assert.equal(h.key(200), 'resume', 'The next Escape retries the paused return');
 }
 for (const phase of ['approaching', 'using', 'leaving'])
   assert(!acceptsMovement({ ...initial(), phase }));
@@ -125,7 +136,7 @@ assert.equal(lookMode({ ...initial(), entered: false }), 'inactive');
 for (const phase of ['approaching', 'using', 'leaving'])
   assert.equal(lookMode({ ...initial(), phase }), 'inactive');
 console.log(
-  'PASS: Escape event ordering, repeat suppression, capture-required movement, guided input, and UI/phase guards.',
+  'PASS: desktop Escape pause-only policy, native event ordering, repeat suppression, guided toggling, capture-required movement, and UI/phase guards.',
 );
 
 const traverse = (sprint, forward = 1, side = 0, hz = 60) => {
@@ -231,12 +242,24 @@ live.keyUp(key('Escape'));
 assert(live.get().paused);
 live.keyDown(key('Escape'));
 live.keyUp(key('Escape'));
-assert(!live.get().paused, 'Actual Escape handler closes the menu');
-live.set({ phase: 'using' });
+assert(live.get().paused, 'Actual desktop Escape handler keeps the menu paused');
+live.set({ phase: 'using', paused: false });
 live.keyDown(key('Escape'));
 live.keyUp(key('Escape'));
-assert.equal(live.get().captures, 1);
-live.set({ phase: 'room', locked: false });
+assert(live.get().paused, 'Desktop Escape pauses while using a computer');
+assert.equal(live.get().captures, 0, 'Desktop Escape never starts another capture request');
+live.set({ phase: 'using', paused: false, guided: true });
+live.keyDown(key('Escape'));
+live.keyUp(key('Escape'));
+assert.equal(live.get().captures, 1, 'Guided Escape still leaves a computer');
+live.set({ phase: 'room' });
+live.keyDown(key('Escape'));
+live.keyUp(key('Escape'));
+assert(live.get().paused);
+live.keyDown(key('Escape'));
+live.keyUp(key('Escape'));
+assert(!live.get().paused, 'Actual guided Escape handler still closes the menu');
+live.set({ phase: 'room', paused: false, locked: false, guided: false });
 live.mouseMove({ target: 'canvas', clientX: 100, clientY: 100, movementX: 0, movementY: 0 });
 live.mouseMove({ target: 'canvas', clientX: 180, clientY: 100, movementX: 80, movementY: 0 });
 assert.equal(live.get().yaw, 0, 'Unlocked mouse events cannot rotate the desktop camera');

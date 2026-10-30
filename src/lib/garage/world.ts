@@ -5,10 +5,15 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { canvasTexture, random } from '../graphics/textures';
 import { computers, type ComputerId } from './computers';
 import { createGaragePower } from './power';
-import { createFoliage } from './foliage';
+import { clearFoliageConstructionCache, createFoliage } from './foliage';
 import { buildCourtyard } from './environment';
 import { createCityMaterials } from './city/materials';
 import { DisposableSet, loadTogether } from './loading';
+import {
+  cloneBatchGeometry,
+  pruneEmptyStaticGroups,
+  releaseUnusedGeometries,
+} from './geometry-batching';
 type P = [number, number, number];
 export type RoomAction =
   | 'kazam'
@@ -995,9 +1000,7 @@ async function assembleCameraRoom(
     const key = o.material.uuid + '/' + (action || '') + '/' + district;
     if (!buckets.has(key))
       buckets.set(key, { material: o.material, action, outdoor, geometries: [] });
-    const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(
-      o.matrixWorld,
-    );
+    const g = cloneBatchGeometry(o.geometry, o.matrixWorld);
     for (const name of Object.keys(g.attributes))
       if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
     if (!g.getAttribute('uv'))
@@ -1010,6 +1013,7 @@ async function assembleCameraRoom(
     originals.push(o);
   });
   for (const o of originals) o.removeFromParent();
+  pruneEmptyStaticGroups(root, scene);
   const batch = new T.Group();
   root.add(batch);
   buckets.forEach((b) => {
@@ -1053,6 +1057,9 @@ async function assembleCameraRoom(
   const rain = new T.LineSegments(rainGeometry, rainMat);
   rain.frustumCulled = false;
   root.add(rain);
+  // Assembly is complete: keep only geometries reachable by the finished scene.
+  clearFoliageConstructionCache(geos);
+  releaseUnusedGeometries(scene, geos);
   let carKick = 0,
     lastAnimation = 0;
   syncPower();

@@ -72,9 +72,10 @@ export function createCitySoundscape(context: AudioContext, output: AudioNode, n
         t = context.currentTime;
       envelope.gain.setTargetAtTime(profile.gain, t, 0.22);
       lowpass.frequency.setTargetAtTime(profile.cutoff, t, 0.26);
-      engines.forEach((engine, i) => {
-        const car = traffic[i];
-        if (!car) return;
+      for (let i = 0; i < engines.length; i++) {
+        const engine = engines[i],
+          car = traffic[i];
+        if (!car) continue;
         const distance = Math.hypot(car.x - position.x, car.z - position.z);
         engine.p.positionX.setTargetAtTime(car.x, t, 0.03);
         engine.p.positionZ.setTargetAtTime(car.z, t, 0.03);
@@ -85,7 +86,7 @@ export function createCitySoundscape(context: AudioContext, output: AudioNode, n
         );
         const pitch = car.kind === 'bus' ? 49 : car.kind === 'auto' ? 86 : 64;
         engine.osc.frequency.setTargetAtTime(pitch + Math.sin(t * 0.7 + i) * 2, t, 0.2);
-      });
+      }
       return profile;
     },
     dispose() {

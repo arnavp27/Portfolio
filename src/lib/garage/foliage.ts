@@ -22,6 +22,11 @@ type LeafForm = PlantSpecies | 'tree';
 const up = new THREE.Vector3(0, 1, 0);
 const resources = new WeakMap<Set<THREE.BufferGeometry>, ReturnType<typeof makeResources>>();
 
+/** Drop construction references; geometry/material ownership remains with the world. */
+export function clearFoliageConstructionCache(geometries: Set<THREE.BufferGeometry>) {
+  return resources.delete(geometries);
+}
+
 /** A cupped blade, not an alpha card: width, tip curl and the central fold are geometry. */
 function blade(form: LeafForm, rows = 9, columns = 5) {
   const positions: number[] = [],

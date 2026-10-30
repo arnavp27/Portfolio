@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { group, type SceneKit, type Point3 } from './types';
+import { group, type SceneKit } from './types';
 import type { CityMaterials } from './materials';
 import { trafficPosition, pedestrianPosition, type TrafficPosition } from './layout';
 import { createTrafficHeadlights } from './headlights';
+import { cloneBatchGeometry } from '../geometry-batching';
 
 /** Rigid vehicle bodies are batched once; animated people use shared instanced body parts. */
 export function createStreetActors(kit: SceneKit, m: CityMaterials) {
@@ -130,8 +131,7 @@ export function createStreetActors(kit: SceneKit, m: CityMaterials) {
     const old: THREE.Mesh[] = [];
     parent.traverse((o) => {
       if (!(o instanceof THREE.Mesh) || Array.isArray(o.material)) return;
-      const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
-      g.applyMatrix4(o.matrixWorld);
+      const g = cloneBatchGeometry(o.geometry, o.matrixWorld);
       const list = buckets.get(o.material) || [];
       list.push(g);
       buckets.set(o.material, list);
@@ -212,17 +212,24 @@ export function createStreetActors(kit: SceneKit, m: CityMaterials) {
     local = new THREE.Object3D(),
     matrix = new THREE.Matrix4();
   let colorsInitialized = false;
+  // Reuse the transform objects; scalar coordinates avoid temporary tuples for every body part.
   function place(
     name: string,
     index: number,
-    position: Point3,
-    rotation: Point3 = [0, 0, 0],
-    scale: Point3 = [1, 1, 1],
-    color = '#ffffff',
+    color: string,
+    x: number,
+    y: number,
+    z: number,
+    rx = 0,
+    ry = 0,
+    rz = 0,
+    sx = 1,
+    sy = 1,
+    sz = 1,
   ) {
-    local.position.set(...position);
-    local.rotation.set(...rotation);
-    local.scale.set(...scale);
+    local.position.set(x, y, z);
+    local.rotation.set(rx, ry, rz);
+    local.scale.set(sx, sy, sz);
     local.updateMatrix();
     matrix.multiplyMatrices(temp.matrix, local.matrix);
     const mesh = parts.get(name)!;
@@ -260,61 +267,38 @@ export function createStreetActors(kit: SceneKit, m: CityMaterials) {
       temp.updateMatrix();
       const sk = skin[i % 3],
         sh = i === 14 ? '#d1c6aa' : shirt[i % 6],
-        tr = i % 3 ? '#39454a' : '#655b4c';
-      place('torso', i, [0, 1.2, 0], [p.speed > 1.5 ? 0.11 : 0, 0, 0], [1, 1, 1], sh);
-      place(
-        'head',
-        i,
-        [0, 1.59, 0.006],
-        [0, Math.sin(time * 0.4 + i) * 0.08, 0],
-        [0.92, 1.18, 0.95],
-        sk,
-      );
-      place('hair', i, [0, 1.62, 0], [0, 0, 0], [0.99, 1.08, 1.01], i % 4 ? '#292823' : '#665844');
-      place('nose', i, [0, 1.6, 0.115], [0, 0, 0], [1, 1, 1], sk);
-      place('collar', i, [0, 1.425, 0.116], [0, 0, 0], [1, 1, 1], i === 14 ? '#e2d5ba' : '#ddd2b7');
-      place(
-        'bag',
-        i,
-        [0, 1.22, -0.18],
-        [0.07, 0, 0],
-        i % 3 === 0 ? [0.01, 0.01, 0.01] : [1, 1, 1],
-        '#3f4140',
-      );
-      for (const side of [-1, 1]) {
+        tr = i % 3 ? '#39454a' : '#655b4c',
+        bagScale = i % 3 === 0 ? 0.01 : 1;
+      place('torso', i, sh, 0, 1.2, 0, p.speed > 1.5 ? 0.11 : 0);
+      place('head', i, sk, 0, 1.59, 0.006, 0, Math.sin(time * 0.4 + i) * 0.08, 0, 0.92, 1.18, 0.95);
+      place('hair', i, i % 4 ? '#292823' : '#665844', 0, 1.62, 0, 0, 0, 0, 0.99, 1.08, 1.01);
+      place('nose', i, sk, 0, 1.6, 0.115);
+      place('collar', i, i === 14 ? '#e2d5ba' : '#ddd2b7', 0, 1.425, 0.116);
+      place('bag', i, '#3f4140', 0, 1.22, -0.18, 0.07, 0, 0, bagScale, bagScale, bagScale);
+      for (let side = -1; side <= 1; side += 2) {
         const n = i * 2 + (side > 0 ? 1 : 0),
           leg = swing * side,
           knee = Math.max(0, -leg) * 0.8;
-        place('eye', n, [side * 0.046, 1.615, 0.11], [0, 0, 0], [1, 1, 1], '#382e25');
+        place('eye', n, '#382e25', side * 0.046, 1.615, 0.11);
         const kneeY = 0.9 - Math.cos(leg) * 0.4,
           kneeZ = -Math.sin(leg) * 0.4;
-        place(
-          'thigh',
-          n,
-          [side * 0.102, 0.9 - Math.cos(leg) * 0.2, -Math.sin(leg) * 0.2],
-          [leg, 0, 0],
-          [1, 1, 1],
-          tr,
-        );
+        place('thigh', n, tr, side * 0.102, 0.9 - Math.cos(leg) * 0.2, -Math.sin(leg) * 0.2, leg);
         place(
           'shin',
           n,
-          [side * 0.102, kneeY - Math.cos(leg - knee) * 0.2, kneeZ - Math.sin(leg - knee) * 0.2],
-          [leg - knee, 0, 0],
-          [1, 1, 1],
           tr,
+          side * 0.102,
+          kneeY - Math.cos(leg - knee) * 0.2,
+          kneeZ - Math.sin(leg - knee) * 0.2,
+          leg - knee,
         );
         place(
           'shoe',
           n,
-          [
-            side * 0.102,
-            kneeY - Math.cos(leg - knee) * 0.4 - 0.05,
-            kneeZ - Math.sin(leg - knee) * 0.4 + 0.055,
-          ],
-          [0, 0, 0],
-          [1, 1, 1],
           '#33332f',
+          side * 0.102,
+          kneeY - Math.cos(leg - knee) * 0.4 - 0.05,
+          kneeZ - Math.sin(leg - knee) * 0.4 + 0.055,
         );
         const arm = i === 14 ? -0.92 : -leg * 0.8,
           elbowY = 1.39 - Math.cos(arm) * 0.27,
@@ -322,37 +306,39 @@ export function createStreetActors(kit: SceneKit, m: CityMaterials) {
         place(
           'upperArm',
           n,
-          [side * 0.247, 1.39 - Math.cos(arm) * 0.135, -Math.sin(arm) * 0.135],
-          [arm, 0, side * 0.07],
-          [1, 1, 1],
           sh,
+          side * 0.247,
+          1.39 - Math.cos(arm) * 0.135,
+          -Math.sin(arm) * 0.135,
+          arm,
+          0,
+          side * 0.07,
         );
         place(
           'forearm',
           n,
-          [
-            side * 0.256,
-            elbowY - Math.cos(arm - (i === 14 ? 0.7 : 0.18)) * 0.13,
-            elbowZ - Math.sin(arm - (i === 14 ? 0.7 : 0.18)) * 0.13,
-          ],
-          [arm - (i === 14 ? 0.7 : 0.18), 0, 0],
-          [1, 1, 1],
           sk,
+          side * 0.256,
+          elbowY - Math.cos(arm - (i === 14 ? 0.7 : 0.18)) * 0.13,
+          elbowZ - Math.sin(arm - (i === 14 ? 0.7 : 0.18)) * 0.13,
+          arm - (i === 14 ? 0.7 : 0.18),
         );
         place(
           'hand',
           n,
-          [
-            side * 0.258,
-            elbowY - Math.cos(arm - (i === 14 ? 0.7 : 0.18)) * 0.26,
-            elbowZ - Math.sin(arm - (i === 14 ? 0.7 : 0.18)) * 0.26,
-          ],
-          [0, 0, 0],
-          [1, 0.95, 0.85],
           sk,
+          side * 0.258,
+          elbowY - Math.cos(arm - (i === 14 ? 0.7 : 0.18)) * 0.26,
+          elbowZ - Math.sin(arm - (i === 14 ? 0.7 : 0.18)) * 0.26,
+          0,
+          0,
+          0,
+          1,
+          0.95,
+          0.85,
         );
       }
-      place('shadow', i, [0, 0.003, 0], [-Math.PI / 2, 0, 0]);
+      place('shadow', i, '#ffffff', 0, 0.003, 0, -Math.PI / 2);
     }
     for (const mesh of parts.values()) {
       mesh.instanceMatrix.needsUpdate = true;

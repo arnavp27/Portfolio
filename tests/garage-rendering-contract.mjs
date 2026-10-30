@@ -34,14 +34,17 @@ class Pass {
 }
 const renderTargets = [];
 class WebGLRenderTarget extends Pass {
-  constructor(width, height, options) {
+  constructor(width, height, options = {}) {
     super();
     this.size = [width, height];
-    this.samples = options.samples;
+    this.options = { ...options };
+    this.samples = options.samples ?? 0;
+    this.depthBuffer = options.depthBuffer ?? true;
+    this.type = options.type;
     renderTargets.push(this);
   }
   clone() {
-    return new WebGLRenderTarget(...this.size, { samples: this.samples });
+    return new WebGLRenderTarget(...this.size, this.options);
   }
 }
 let latestComposer;
@@ -88,7 +91,27 @@ class GTAOPass extends Pass {
   }
   updatePdMaterial() {}
 }
-class RenderPass extends Pass {}
+// The real pass's attachment lifecycle is tested in garage-scene-render-pass-contract.
+// Here the boundary records how the rendering module configures that independent pass.
+class SceneRenderPass extends Pass {
+  sampleUpdates = [];
+  constructor(scene, camera, samples) {
+    super();
+    this.scene = scene;
+    this.camera = camera;
+    this.samples = samples;
+  }
+  compileAsync(renderer) {
+    if (this.disposed) return Promise.resolve();
+    this.compileRenderer = renderer;
+    this.compilations = (this.compilations ?? 0) + 1;
+    return this.compilation ?? Promise.resolve();
+  }
+  setSamples(samples) {
+    this.samples = samples;
+    this.sampleUpdates.push(samples);
+  }
+}
 class UnrealBloomPass extends Pass {}
 class SMAAPass extends Pass {}
 class OutputPass extends Pass {}
@@ -116,12 +139,34 @@ class FogExp2 {
     this.density = density;
   }
 }
+const pmremGenerators = [],
+  roomEnvironments = [];
 class PMREMGenerator extends Pass {
-  fromScene() {
-    return { texture: {}, dispose() {} };
+  sceneCalls = [];
+  equirectangularCalls = [];
+  constructor() {
+    super();
+    pmremGenerators.push(this);
   }
-  fromEquirectangular() {
-    return this.fromScene();
+  fromScene(scene, sigma) {
+    assert(!this.disposed, 'Disposed PMREM generators must not receive fallback work');
+    const target = new Pass();
+    target.texture = {};
+    this.sceneCalls.push({ scene, sigma, target });
+    return target;
+  }
+  fromEquirectangular(texture) {
+    assert(!this.disposed, 'Disposed PMREM generators must not receive sky work');
+    const target = new Pass();
+    target.texture = {};
+    this.equirectangularCalls.push({ texture, target });
+    return target;
+  }
+}
+class RoomEnvironment extends Pass {
+  constructor() {
+    super();
+    roomEnvironments.push(this);
   }
 }
 const three = {
@@ -138,33 +183,51 @@ const three = {
   Color: Pass,
   PMREMGenerator,
 };
-const modules = { three };
+const pendingSkyLoads = [],
+  optimizedMaterials = [],
+  warnings = [];
+const modules = {
+  three,
+  './scene-render-pass': { SceneRenderPass },
+  './direct-lighting': {
+    optimizeDirectLighting(material) {
+      optimizedMaterials.push(material);
+    },
+  },
+  './night-sky': {
+    loadNightSky() {
+      const request = pendingSkyLoads.shift();
+      assert(request, 'Every rig must provide its own sky request');
+      request.calls++;
+      return request.promise;
+    },
+  },
+};
 for (const [name, Constructor] of Object.entries({
   EffectComposer,
-  RenderPass,
   GTAOPass,
   UnrealBloomPass,
   SMAAPass,
   OutputPass,
-  RoomEnvironment: Pass,
-  HDRLoader: class {
-    async loadAsync() {
-      return { image: { data: [] }, dispose() {} };
-    }
-  },
+  RoomEnvironment,
 }))
   modules[name] = { [name]: Constructor };
 const exports = {};
 Function(
   'require',
   'exports',
+  'console',
   outputText,
-)((id) => {
-  if (id === './graphics-settings') return settingsModule;
-  const module = modules[id === 'three' ? id : id.split('/').at(-1).replace('.js', '')];
-  assert(module, `Unexpected production dependency: ${id}`);
-  return module;
-}, exports);
+)(
+  (id) => {
+    if (id === './graphics-settings') return settingsModule;
+    const module = modules[id] ?? modules[id.split('/').at(-1).replace('.js', '')];
+    assert(module, `Unexpected production dependency: ${id}`);
+    return module;
+  },
+  exports,
+  { warn: (...args) => warnings.push(args) },
+);
 
 async function createRig({
   dpr = 1,
@@ -173,8 +236,15 @@ async function createRig({
   maxSamples = 8,
   maxAnisotropy = 8,
   initialSettings,
+  skyPromise,
+  waitForReady = true,
 } = {}) {
-  const targetStart = renderTargets.length;
+  const targetStart = renderTargets.length,
+    roomStart = roomEnvironments.length,
+    materialStart = optimizedMaterials.length,
+    warningStart = warnings.length;
+  const skyTexture = skyPromise ? undefined : new Texture();
+  const skyLoad = { promise: skyPromise ?? Promise.resolve(skyTexture), calls: 0 };
   const view = { devicePixelRatio: dpr };
   const gl = {
     RENDERBUFFER: 0x8d41,
@@ -226,10 +296,17 @@ async function createRig({
     },
   };
   const host = { dataset: {}, ownerDocument: { defaultView: view } };
-  const graphics = exports.createGarageRendering(renderer, scene, {}, host);
+  const camera = {};
+  pendingSkyLoads.push(skyLoad);
+  const graphics = exports.createGarageRendering(renderer, scene, camera, host);
   if (initialSettings) graphics.setSettings(initialSettings);
-  const composer = latestComposer;
-  await graphics.ready;
+  const composer = latestComposer,
+    pmrem = pmremGenerators.at(-1);
+  if (waitForReady) await graphics.ready;
+  const beauty = composer.passes.find((pass) => pass instanceof SceneRenderPass);
+  assert(beauty, 'The scene must include an independently configured geometry pass');
+  assert.equal(beauty.scene, scene);
+  assert.equal(beauty.camera, camera);
   const ao = composer.passes.find((pass) => pass instanceof GTAOPass);
   const bloom = composer.passes.find((pass) => pass instanceof UnrealBloomPass);
   const smaa = composer.passes.find((pass) => pass instanceof SMAAPass);
@@ -238,6 +315,7 @@ async function createRig({
     graphics,
     renderer,
     composer,
+    beauty,
     ao,
     bloom,
     smaa,
@@ -248,6 +326,12 @@ async function createRig({
     shadow,
     shadowMap,
     shadowPass,
+    skyTexture,
+    skyLoad,
+    pmrem,
+    rooms: () => roomEnvironments.slice(roomStart),
+    lightingMaterials: () => optimizedMaterials.slice(materialStart),
+    warnings: () => warnings.slice(warningStart),
     targets: () => renderTargets.slice(targetStart),
   };
 }
@@ -268,6 +352,7 @@ await test('window width preserves full effects and the fixed 60% scene resoluti
       assert.equal(rig.composer.ratio, 0.6);
       assert.deepEqual(rig.renderer.buffer, [Math.floor(width * 0.6), Math.floor(762 * 0.6)]);
       assert.deepEqual(rig.composer.size, [width, 762]);
+      assert.deepEqual(rig.beauty.size, [width * 0.6, 762 * 0.6]);
       const before = [rig.ao.renders, rig.bloom.renders];
       rig.graphics.render();
       assert.deepEqual(
@@ -332,7 +417,12 @@ await test('HDR multisampling respects both attachments and the device sample li
   ]) {
     const rig = await createRig(options);
     try {
-      assert.equal(rig.composer.target.samples, expected, JSON.stringify(options));
+      assert.equal(rig.beauty.samples, expected, JSON.stringify(options));
+      for (const target of [rig.composer.target, rig.composer.otherTarget]) {
+        assert.equal(target.samples, 0, 'Fullscreen effects remain single-sample');
+        assert.equal(target.depthBuffer, false, 'Fullscreen effects allocate no scene depth');
+        assert.equal(target.type, three.HalfFloatType, 'Postprocessing retains HDR precision');
+      }
     } finally {
       rig.graphics.dispose();
     }
@@ -344,7 +434,7 @@ await test('edge smoothing follows the scaled scene resolution and releases its 
   try {
     assert.deepEqual(
       rig.composer.passes.map((pass) => pass.constructor.name),
-      ['RenderPass', 'GTAOPass', 'UnrealBloomPass', 'SMAAPass', 'OutputPass'],
+      ['SceneRenderPass', 'GTAOPass', 'UnrealBloomPass', 'SMAAPass', 'OutputPass'],
     );
     rig.graphics.resize(1280, 720);
     assert.deepEqual(rig.smaa.size, [1280 * 1.2, 720 * 1.2]);
@@ -413,6 +503,7 @@ await test('live settings change the real pipeline and survive resizing and disp
       assert.equal(rig.ao.enabled, false);
       assert.equal(rig.bloom.enabled, false);
       assert.equal(rig.smaa.enabled, false);
+      assert.equal(rig.beauty.samples, 0);
       assert.equal(rig.composer.target.samples, 0);
       assert.equal(rig.ao.blendIntensity, 0.65);
       assert.equal(rig.ao.parameters.radius, 0.8);
@@ -449,11 +540,13 @@ await test('live settings change the real pipeline and survive resizing and disp
   }
 });
 
-await test('AA switching retires old targets without replacing effect passes or leaking resources', async () => {
+await test('AA switching changes only scene samples and preserves fullscreen buffers and passes', async () => {
   const rig = await createRig();
   try {
     rig.graphics.resize(1280, 720);
     const originalPasses = [...rig.composer.passes];
+    const postTargets = [rig.composer.target, rig.composer.otherTarget];
+    assert.equal(rig.beauty.samples, 4);
     for (const [antialias, samples, smoothing] of [
       ['smaa', 0, true],
       ['off', 0, false],
@@ -462,27 +555,55 @@ await test('AA switching retires old targets without replacing effect passes or 
       ['off', 0, false],
       ['both', 4, true],
     ]) {
-      const previousTarget = rig.composer.target;
-      const previousSamples = previousTarget.samples;
+      const previousSamples = rig.beauty.samples;
+      const previousUpdates = rig.beauty.sampleUpdates.length;
       rig.graphics.setSettings({ ...defaultGraphics, antialias });
-      assert.equal(rig.composer.target.samples, samples);
+      assert.equal(rig.beauty.samples, samples);
+      assert.equal(
+        rig.beauty.sampleUpdates.length,
+        previousUpdates + (previousSamples === samples ? 0 : 1),
+        'Only a changed sample count requests replacement scene attachments',
+      );
       assert.equal(rig.smaa.enabled, smoothing);
       assert.deepEqual(rig.composer.passes, originalPasses);
-      if (previousSamples === samples) assert.equal(rig.composer.target, previousTarget);
-      else assert.equal(previousTarget.disposeCount, 1);
-      assert.equal(rig.targets().filter((target) => !target.disposed).length, 2);
+      assert.equal(rig.composer.target, postTargets[0]);
+      assert.equal(rig.composer.otherTarget, postTargets[1]);
+      assert.equal(rig.composer.resets ?? 0, 0, 'AA never resets the postprocessing composer');
+      assert.equal(rig.targets().length, 2, 'AA does not allocate replacement fullscreen buffers');
+      for (const target of postTargets) {
+        assert.equal(target.samples, 0);
+        assert.equal(target.depthBuffer, false);
+        assert.equal(target.disposeCount ?? 0, 0);
+      }
     }
-    const liveTarget = rig.composer.target;
+    assert.deepEqual(rig.beauty.sampleUpdates, [0, 4, 0, 4]);
     rig.graphics.setSettings({ ...defaultGraphics, exposure: 1.5, ao: false });
-    assert.equal(rig.composer.target, liveTarget, 'Uniform changes must not rebuild buffers');
+    assert.deepEqual(
+      rig.beauty.sampleUpdates,
+      [0, 4, 0, 4],
+      'Uniform changes do not rebuild scene attachments',
+    );
+    assert.equal(
+      rig.composer.target,
+      postTargets[0],
+      'Uniform changes do not rebuild postprocessing buffers',
+    );
+    assert.equal(rig.composer.otherTarget, postTargets[1]);
   } finally {
     rig.graphics.dispose();
   }
   for (const target of rig.targets()) assert.equal(target.disposeCount, 1);
   for (const pass of rig.composer.passes) assert.equal(pass.disposeCount, 1);
+  assert.equal(rig.composer.disposeCount, 1);
   const count = rig.targets().length;
+  const sampleUpdates = [...rig.beauty.sampleUpdates];
   rig.graphics.setSettings({ ...defaultGraphics, antialias: 'off' });
   assert.equal(rig.targets().length, count, 'Disposed renderers must not allocate new targets');
+  assert.deepEqual(
+    rig.beauty.sampleUpdates,
+    sampleUpdates,
+    'Disposed renderers do not reconfigure scene attachments',
+  );
 });
 
 await test('late assets preserve chosen settings and shadow sizes restore from authored dimensions', async () => {
@@ -496,8 +617,18 @@ await test('late assets preserve chosen settings and shadow sizes restore from a
   };
   const rig = await createRig({ initialSettings: custom, maxAnisotropy: 4 });
   try {
-    assert.equal(rig.scene.environmentIntensity, 0.6, 'Loading the HDR must retain settings');
+    assert.equal(
+      rig.scene.environmentIntensity,
+      0.6,
+      'Loading the authored sky must retain settings',
+    );
+    assert.deepEqual(rig.lightingMaterials(), []);
     rig.graphics.prepare();
+    assert.deepEqual(
+      rig.lightingMaterials(),
+      [rig.material],
+      'Late scene materials receive the direct-light optimization',
+    );
     assert.equal(rig.renderer.shadowMap.type, three.BasicShadowMap);
     assert.equal(rig.renderer.toneMapping, three.NoToneMapping);
     assert.equal(rig.renderer.shadowMap.needsUpdate, true);
@@ -510,6 +641,11 @@ await test('late assets preserve chosen settings and shadow sizes restore from a
     assert.equal(rig.texture.minFilter, 'authored-min');
     assert.equal(rig.texture.magFilter, 'authored-mag');
     rig.graphics.prepare();
+    assert.deepEqual(
+      rig.lightingMaterials(),
+      [rig.material, rig.material],
+      'Rescanning applies the idempotent hook to discovered materials',
+    );
     assert.deepEqual([rig.shadow.mapSize.x, rig.shadow.mapSize.y], [2048, 2048]);
     assert.equal(rig.shadowMap.disposeCount, 1, 'Rescanning must not dispose a retired map again');
     rig.graphics.setSettings(defaultGraphics);
@@ -517,5 +653,141 @@ await test('late assets preserve chosen settings and shadow sizes restore from a
     assert.equal(rig.renderer.shadowMap.type, three.PCFShadowMap);
   } finally {
     rig.graphics.dispose();
+  }
+});
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+await test('authored sky loading never builds a fallback and owns its final GPU resources', async () => {
+  const load = deferred(),
+    texture = new Texture();
+  const rig = await createRig({
+    skyPromise: load.promise,
+    waitForReady: false,
+    initialSettings: { ...defaultGraphics, environmentIntensity: 0.6 },
+  });
+  try {
+    assert.equal(rig.skyLoad.calls, 1);
+    assert.equal(rig.rooms().length, 0, 'Pending sky loads allocate no fallback environment');
+    assert.equal(rig.pmrem.sceneCalls.length, 0);
+    assert.equal(rig.pmrem.equirectangularCalls.length, 0);
+    load.resolve(texture);
+    await rig.graphics.ready;
+    assert.equal(rig.rooms().length, 0, 'Successful sky loads never construct a room environment');
+    assert.equal(rig.pmrem.sceneCalls.length, 0);
+    assert.equal(rig.pmrem.equirectangularCalls.length, 1);
+    const generated = rig.pmrem.equirectangularCalls[0];
+    assert.equal(generated.texture, texture);
+    assert.equal(rig.scene.environment, generated.target.texture);
+    assert.equal(rig.scene.background, texture);
+    assert.equal(rig.scene.backgroundIntensity, 1);
+    assert.equal(rig.scene.backgroundBlurriness, 0.035);
+    assert.equal(rig.scene.backgroundRotation.y, 0.7);
+    assert.equal(rig.scene.environmentRotation.y, 0.7);
+    assert.equal(rig.scene.environmentIntensity, 0.6);
+    assert.equal(generated.target.disposeCount ?? 0, 0);
+    assert.equal(texture.disposeCount ?? 0, 0);
+    assert.deepEqual(rig.warnings(), []);
+  } finally {
+    rig.graphics.dispose();
+  }
+  assert.equal(rig.pmrem.equirectangularCalls[0].target.disposeCount, 1);
+  assert.equal(texture.disposeCount, 1);
+  assert.equal(rig.pmrem.disposeCount, 1);
+  assert.equal(rig.scene.environment, null);
+  assert.equal(rig.scene.background, null);
+});
+
+await test('sky failure lazily builds the lighting fallback and disposes its temporary scene', async () => {
+  const load = deferred(),
+    failure = new Error('night sky request failed');
+  const rig = await createRig({ skyPromise: load.promise, waitForReady: false });
+  const originalBackground = rig.scene.background;
+  try {
+    assert.equal(rig.rooms().length, 0);
+    assert.equal(rig.pmrem.sceneCalls.length, 0);
+    load.reject(failure);
+    await rig.graphics.ready;
+    assert.equal(rig.rooms().length, 1);
+    assert.equal(rig.pmrem.sceneCalls.length, 1);
+    assert.equal(rig.pmrem.equirectangularCalls.length, 0);
+    const generated = rig.pmrem.sceneCalls[0];
+    assert.equal(generated.scene, rig.rooms()[0]);
+    assert.equal(generated.sigma, 0.06);
+    assert.equal(generated.scene.disposeCount, 1, 'The fallback room is temporary');
+    assert.equal(generated.target.disposeCount ?? 0, 0, 'Its generated lighting stays live');
+    assert.equal(rig.scene.environment, generated.target.texture);
+    assert.equal(rig.scene.background, originalBackground);
+    assert.deepEqual(rig.warnings(), [['Using the garage lighting fallback.', failure]]);
+  } finally {
+    rig.graphics.dispose();
+  }
+  assert.equal(rig.pmrem.sceneCalls[0].target.disposeCount, 1);
+  assert.equal(rig.rooms()[0].disposeCount, 1);
+  assert.equal(rig.pmrem.disposeCount, 1);
+});
+
+await test('a sky that resolves after disposal is released without reviving the scene or PMREM', async () => {
+  const load = deferred(),
+    texture = new Texture();
+  const rig = await createRig({ skyPromise: load.promise, waitForReady: false });
+  rig.graphics.dispose();
+  load.resolve(texture);
+  await rig.graphics.ready;
+  assert.equal(texture.disposeCount, 1);
+  assert.equal(rig.pmrem.disposeCount, 1);
+  assert.equal(rig.pmrem.equirectangularCalls.length, 0);
+  assert.equal(rig.pmrem.sceneCalls.length, 0);
+  assert.equal(rig.rooms().length, 0);
+  assert.equal(rig.scene.environment, null);
+  assert.equal(rig.scene.background, null);
+  assert.deepEqual(rig.warnings(), []);
+  assert.equal(rig.targets().length, 2);
+  for (const target of rig.targets()) assert.equal(target.disposeCount, 1);
+  for (const pass of rig.composer.passes) assert.equal(pass.disposeCount, 1);
+});
+
+await test('a sky that rejects after disposal cannot allocate fallback resources', async () => {
+  const load = deferred();
+  const rig = await createRig({ skyPromise: load.promise, waitForReady: false });
+  rig.graphics.dispose();
+  load.reject(new Error('late sky failure'));
+  await rig.graphics.ready;
+  assert.equal(rig.pmrem.disposeCount, 1);
+  assert.equal(rig.pmrem.sceneCalls.length, 0);
+  assert.equal(rig.pmrem.equirectangularCalls.length, 0);
+  assert.equal(rig.rooms().length, 0);
+  assert.equal(rig.scene.environment, null);
+  assert.equal(rig.scene.background, null);
+  assert.deepEqual(rig.warnings(), []);
+  for (const target of rig.targets()) assert.equal(target.disposeCount, 1);
+  for (const pass of rig.composer.passes) assert.equal(pass.disposeCount, 1);
+});
+
+await test('prewarming delegates to the beauty pass and preserves pending work and failures', async () => {
+  const rig = await createRig();
+  try {
+    const compilation = deferred();
+    rig.beauty.compilation = compilation.promise;
+    assert.equal(rig.graphics.compile(), compilation.promise);
+    assert.equal(rig.beauty.compileRenderer, rig.renderer);
+    assert.equal(rig.beauty.compilations, 1);
+    assert.equal(rig.beauty.renders, 0, 'Prewarming must not draw an incomplete frame');
+    const failure = new Error('Compile failed');
+    const rejected = assert.rejects(compilation.promise, (error) => error === failure);
+    compilation.reject(failure);
+    await rejected;
+    rig.graphics.dispose();
+    await rig.graphics.compile();
+    assert.equal(rig.beauty.compilations, 1, 'Disposed passes cannot queue more shaders');
+  } finally {
+    if (!rig.beauty.disposed) rig.graphics.dispose();
   }
 });

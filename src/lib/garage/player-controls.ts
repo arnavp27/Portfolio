@@ -30,6 +30,9 @@ export function createEscapeController() {
       }
       awaitingKey = false;
       if (!state.entered) return null;
+      // Desktop resume needs an activation gesture for fullscreen and pointer capture.
+      // The focused menu button handles Enter; Escape only pauses the game.
+      if (!state.guided) return state.paused ? null : 'pause';
       if (state.phase === 'leaving') return state.paused ? 'resume' : null;
       if (state.phase !== 'room') return 'leave-computer';
       return state.paused ? 'resume' : 'pause';

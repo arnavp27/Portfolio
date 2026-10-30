@@ -324,23 +324,19 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
       apply();
     },
     update: (p: Position, forward: Position, traffic: TrafficPosition[] = []) => {
-      const profile = cityAcousticsAt(p);
-      if (!context || context.state !== 'running') return profile;
-      city?.update(p, traffic);
+      if (!context || context.state !== 'running') return cityAcousticsAt(p);
+      const profile = city ? city.update(p, traffic) : cityAcousticsAt(p);
       const l = context.listener,
         t = context.currentTime;
-      for (const [param, value] of [
-        [l.positionX, p.x],
-        [l.positionY, p.y],
-        [l.positionZ, p.z],
-        [l.forwardX, forward.x],
-        [l.forwardY, forward.y],
-        [l.forwardZ, forward.z],
-        [l.upX, 0],
-        [l.upY, 1],
-        [l.upZ, 0],
-      ] as [AudioParam, number][])
-        param.setTargetAtTime(value, t, 0.03);
+      l.positionX.setTargetAtTime(p.x, t, 0.03);
+      l.positionY.setTargetAtTime(p.y, t, 0.03);
+      l.positionZ.setTargetAtTime(p.z, t, 0.03);
+      l.forwardX.setTargetAtTime(forward.x, t, 0.03);
+      l.forwardY.setTargetAtTime(forward.y, t, 0.03);
+      l.forwardZ.setTargetAtTime(forward.z, t, 0.03);
+      l.upX.setTargetAtTime(0, t, 0.03);
+      l.upY.setTargetAtTime(1, t, 0.03);
+      l.upZ.setTargetAtTime(0, t, 0.03);
       return profile;
     },
     dispose: () => {

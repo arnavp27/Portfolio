@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import GarageRecovery from './GarageRecovery';
+import { createGarageFullscreen } from '../lib/garage/fullscreen';
 import {
   defaultGraphics,
   normalizeGraphics,
@@ -68,6 +69,7 @@ export default function Garage({ projects, articles }: Props) {
     canvas = useRef<HTMLDivElement>(null),
     surface = useRef<HTMLDivElement>(null),
     controls = useRef<ExplorerControls | null>(null),
+    fullscreen = useRef<ReturnType<typeof createGarageFullscreen> | null>(null),
     sound = useRef<GarageSound | null>(null),
     previous = useRef('room'),
     graphicsRef = useRef<GraphicsSettings>({ ...defaultGraphics });
@@ -85,9 +87,9 @@ export default function Garage({ projects, articles }: Props) {
     [hint, setHint] = useState(false),
     [audioState, setAudioState] = useState('idle');
   const using = computer.phase !== 'room',
-    menu = game.entered && game.paused && !inspect && !graphicsOpen,
     entry = !game.entered,
     capturePending = game.capture === 'requesting',
+    menu = game.entered && game.paused && !inspect && !graphicsOpen,
     computerBlocked = game.paused || inspect || graphicsOpen;
   const effectiveGraphics = import.meta.env.DEV
     ? (graphicsPreview ?? graphicsSettings)
@@ -95,7 +97,8 @@ export default function Garage({ projects, articles }: Props) {
   const solar = projects.find((p) => p.scene === 'solar');
   useEffect(() => {
     let cancelled = false,
-      mounted: ExplorerControls | undefined;
+      mounted: ExplorerControls | undefined,
+      immersive: ReturnType<typeof createGarageFullscreen> | undefined;
     const overflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     window.scrollTo(0, 0);
@@ -160,8 +163,13 @@ export default function Garage({ projects, articles }: Props) {
           onState: setGame,
           onComputerState: setComputer,
           onInspect: () => setInspect(true),
+          onPause: () => fullscreen.current?.exit(),
         });
         controls.current = mounted;
+        if (root.current) {
+          immersive = createGarageFullscreen(root.current, () => mounted?.pause());
+          fullscreen.current = immersive;
+        }
         mounted.setReduced(motion);
         mounted.setGraphics(graphicsRef.current);
       } catch (error) {
@@ -172,6 +180,8 @@ export default function Garage({ projects, articles }: Props) {
     return () => {
       cancelled = true;
       clearInterval(clockTimer);
+      immersive?.dispose();
+      fullscreen.current = null;
       mounted?.dispose();
       audio.dispose();
       controls.current = null;
@@ -230,12 +240,14 @@ export default function Garage({ projects, articles }: Props) {
   }, [failed]);
   useEffect(() => {
     if ((!menu && !inspect) || failed) return;
-    const selector = inspect ? '.garage-inspect' : '.garage-pause';
+    const selector = inspect
+      ? '.garage-inspect button:not(:disabled)'
+      : '.garage-pause .garage-enter';
     const frame = requestAnimationFrame(() =>
-      focusUiElement(root.current?.querySelector<HTMLElement>(`${selector} button:not(:disabled)`)),
+      focusUiElement(root.current?.querySelector<HTMLElement>(selector)),
     );
     return () => cancelAnimationFrame(frame);
-  }, [menu, inspect, failed]);
+  }, [menu, inspect, capturePending, failed]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && graphicsOpen) {
@@ -249,7 +261,8 @@ export default function Garage({ projects, articles }: Props) {
         e.preventDefault();
         e.stopImmediatePropagation();
         setInspect(false);
-        controls.current?.resume();
+        if (game.guided) controls.current?.resume();
+        else controls.current?.pause();
         return;
       }
       if (e.key !== 'Tab' || !(using || menu || inspect || entry || graphicsOpen)) return;
@@ -285,7 +298,7 @@ export default function Garage({ projects, articles }: Props) {
     };
     window.addEventListener('keydown', key, true);
     return () => window.removeEventListener('keydown', key, true);
-  }, [entry, menu, using, inspect, graphicsOpen]);
+  }, [entry, menu, using, inspect, graphicsOpen, game.guided]);
   const changeGraphics = (next: GraphicsSettings) => {
     if (!import.meta.env.DEV) return;
     const value = normalizeGraphics(next);
@@ -300,8 +313,16 @@ export default function Garage({ projects, articles }: Props) {
     setGraphicsPreview(null);
     setGraphicsOpen(false);
   };
+  const enterFullscreen = () => {
+    if (matchMedia('(pointer: fine)').matches) void fullscreen.current?.enter();
+  };
   const start = () => {
-    controls.current?.start();
+    // Pointer lock must be requested before fullscreen consumes this click's activation.
+    if (controls.current?.start()) enterFullscreen();
+  };
+  const resume = () => {
+    if (capturePending) return;
+    if (controls.current?.resume()) enterFullscreen();
   };
   const mute = () => setSettings((s) => ({ ...s, muted: !s.muted }));
   const motion = () =>
@@ -335,7 +356,7 @@ export default function Garage({ projects, articles }: Props) {
       className="garage-sound-button garage-icon"
       onClick={() => {
         mute();
-        if (game.entered && !menu && !using && !inspect && !graphicsOpen)
+        if (game.entered && !game.paused && !using && !inspect && !graphicsOpen)
           canvas.current?.focus({ preventScroll: true });
       }}
       aria-label={settings.muted ? 'Unmute sound' : 'Mute sound'}
@@ -377,7 +398,7 @@ export default function Garage({ projects, articles }: Props) {
           style={{ opacity: effectiveGraphics.vignette }}
           aria-hidden="true"
         />
-        {!failed && !entry && !menu && !inspect && !using && !graphicsOpen && (
+        {!failed && !entry && !game.paused && !inspect && !using && !graphicsOpen && (
           <button
             className="garage-menu-button garage-icon"
             onClick={() => controls.current?.pause()}
@@ -387,8 +408,8 @@ export default function Garage({ projects, articles }: Props) {
             <span>Ⅱ</span>
           </button>
         )}
-        {!failed && !entry && !menu && !inspect && !using && !graphicsOpen && soundButton}
-        {!failed && !entry && !menu && !inspect && !using && !graphicsOpen && (
+        {!failed && !entry && !game.paused && !inspect && !using && !graphicsOpen && soundButton}
+        {!failed && !entry && !game.paused && !inspect && !using && !graphicsOpen && (
           <>
             {!game.guided && game.locked && !game.paused && computer.phase === 'room' && (
               <div
@@ -483,6 +504,7 @@ export default function Garage({ projects, articles }: Props) {
                     Enter garage <span>↵</span>
                   </button>
                   <div className="garage-entry-keys">
+                    Fullscreen <span>·</span>
                     <kbd>W A S D</kbd> walk <span>·</span>
                     <kbd>SHIFT</kbd> walk / run <span>·</span>
                     <kbd>SPACE</kbd> jump <span>·</span>
@@ -493,30 +515,23 @@ export default function Garage({ projects, articles }: Props) {
                 </>
               ) : (
                 <>
-                  <button
-                    className="garage-enter"
-                    disabled={capturePending}
-                    onClick={() => controls.current?.resume()}
-                  >
-                    {capturePending ? 'Capturing mouse…' : 'Back to the garage'} <span>↵</span>
+                  <button className="garage-enter" aria-busy={capturePending} onClick={resume}>
+                    Back to the garage <span>↵</span>
                   </button>
-                  {!game.guided && (capturePending || game.capture === 'unavailable') && (
-                    <p className="garage-capture-help" role="status">
-                      {capturePending
-                        ? 'Waiting for the browser to capture your mouse.'
-                        : 'Mouse capture was not granted. Click Back to the garage to try again.'}
-                    </p>
-                  )}
                   <div className="garage-shortcuts">
                     <button
                       disabled={capturePending || using || !game.power.computers.kazam}
-                      onClick={() => controls.current?.useComputer('kazam')}
+                      onClick={() => {
+                        if (controls.current?.useComputer('kazam')) enterFullscreen();
+                      }}
                     >
                       Work computer <span>↗</span>
                     </button>
                     <button
                       disabled={capturePending || using || !game.power.computers.projects}
-                      onClick={() => controls.current?.useComputer('projects')}
+                      onClick={() => {
+                        if (controls.current?.useComputer('projects')) enterFullscreen();
+                      }}
                     >
                       Personal computer <span>↗</span>
                     </button>
@@ -531,7 +546,9 @@ export default function Garage({ projects, articles }: Props) {
                     </button>
                     <button
                       disabled={capturePending || using}
-                      onClick={() => controls.current?.walkTo('courtyard')}
+                      onClick={() => {
+                        if (controls.current?.walkTo('courtyard')) enterFullscreen();
+                      }}
                     >
                       Walk outside <span>↗</span>
                     </button>
@@ -617,7 +634,7 @@ export default function Garage({ projects, articles }: Props) {
                   aria-label="Put down the photos"
                   onClick={() => {
                     setInspect(false);
-                    controls.current?.resume();
+                    resume();
                   }}
                 >
                   ×
@@ -666,7 +683,7 @@ export default function Garage({ projects, articles }: Props) {
             disabled={computer.phase === 'leaving'}
             onClick={() => controls.current?.leaveComputer()}
           >
-            <kbd>ESC</kbd>Step away
+            Step away
           </button>
           <button
             className="garage-pc-sound"

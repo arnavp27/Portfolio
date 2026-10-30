@@ -13,8 +13,10 @@ const nodes = [],
 const settle = () => new Promise((r) => setTimeout(r, 0));
 class Param {
   value = 0;
-  setTargetAtTime(v) {
+  targets = [];
+  setTargetAtTime(v, time, constant) {
     assert(Number.isFinite(v));
+    this.targets.push({ value: v, time, constant });
     this.value = v;
   }
   setValueAtTime(v) {
@@ -128,6 +130,12 @@ let status = 'idle';
 const audio = createGarageSound((s) => (status = s));
 audio.play('boot');
 assert.equal(contexts.length, 0, 'No audio graph before user activation');
+assert.deepEqual(audio.update({ x: 0, y: 1.64, z: 13 }, { x: 0, y: 0, z: -1 }), {
+  gain: 1,
+  cutoff: 9500,
+  zone: 'street',
+});
+assert.equal(contexts.length, 0, 'Acoustic feedback does not activate audio');
 await audio.start();
 await new Promise((r) => setTimeout(r, 0));
 assert.equal(status, 'running');
@@ -165,6 +173,25 @@ for (const effect of [
 }
 audio.update({ x: 1, y: 1.6, z: -2 }, { x: 0, y: 0, z: -1 });
 assert.equal(contexts[0].listener.positionZ.value, -2);
+const listenerParams = Object.values(contexts[0].listener);
+assert.deepEqual(
+  listenerParams.map((param) => param.targets.at(-1)),
+  [1, 1.6, -2, 0, 0, -1, 0, 1, 0].map((value) => ({ value, time: 10, constant: 0.03 })),
+  'All listener axes use the same smooth spatial update',
+);
+contexts[0].currentTime = 10.25;
+audio.update({ x: -3, y: 1.7, z: 8 }, { x: 0.3, y: -0.2, z: -0.9 });
+assert.deepEqual(
+  listenerParams.map((param) => param.targets.at(-1)),
+  [-3, 1.7, 8, 0.3, -0.2, -0.9, 0, 1, 0].map((value) => ({ value, time: 10.25, constant: 0.03 })),
+  'Turning and walking preserve the position, orientation and interpolation curve',
+);
+contexts[0].currentTime = 10.5;
+audio.update({ x: -3, y: 1.7, z: 8 }, { x: 0.3, y: -0.2, z: -0.9 });
+assert(
+  listenerParams.every((param) => param.targets.length === 3 && param.targets.at(-1).time === 10.5),
+  'Stationary frames preserve the existing automation schedule',
+);
 assert(
   requests.every((url) => url === '/assets/audio/after-rain.ogg'),
   'Synthesized cues never fetch external recordings',
@@ -236,11 +263,55 @@ const sampleTraffic = Array.from({ length: 12 }, (_, i) => ({
   y: 0.7,
   z: i % 2 ? 22.4 : 18.4,
   speed: 5.4,
-  kind: 'car',
+  kind: ['bus', 'auto', 'car'][i % 3],
 }));
-audio.update({ x: 0, y: 1.64, z: 13 }, { x: 0, y: 0, z: -1 }, sampleTraffic);
+const streetProfile = audio.update({ x: 0, y: 1.64, z: 13 }, { x: 0, y: 0, z: -1 }, sampleTraffic);
 assert.equal(cityEnvelope.gain.value, 1);
 assert.equal(cityFilter.frequency.value, 9500);
+assert.deepEqual(streetProfile, {
+  gain: cityEnvelope.gain.value,
+  cutoff: cityFilter.frequency.value,
+  zone: 'street',
+});
+assert.deepEqual(cityEnvelope.gain.targets.at(-1), {
+  value: 1,
+  time: contexts[0].currentTime,
+  constant: 0.22,
+});
+assert.deepEqual(cityFilter.frequency.targets.at(-1), {
+  value: 9500,
+  time: contexts[0].currentTime,
+  constant: 0.26,
+});
+const engines = cityPanners
+  .slice(1)
+  .map((panner) =>
+    nodes.find((node) => node.kind === 'oscillator' && node.target?.target?.target === panner),
+  );
+for (let i = 0; i < sampleTraffic.length; i++) {
+  const car = sampleTraffic[i],
+    time = contexts[0].currentTime;
+  assert.deepEqual(cityPanners[i + 1].positionX.targets.at(-1), {
+    value: car.x,
+    time,
+    constant: 0.03,
+  });
+  assert.deepEqual(cityPanners[i + 1].positionZ.targets.at(-1), {
+    value: car.z,
+    time,
+    constant: 0.03,
+  });
+  assert.deepEqual(engines[i].target.gain.targets.at(-1), {
+    value: [0.07, 0.045, 0.028][i % 3],
+    time,
+    constant: 0.15,
+  });
+  assert.deepEqual(engines[i].frequency.targets.at(-1), {
+    value: [49, 86, 64][i % 3] + Math.sin(time * 0.7 + i) * 2,
+    time,
+    constant: 0.2,
+  });
+}
 audio.update({ x: 0, y: 1.64, z: 8 }, { x: 0, y: 0, z: -1 }, sampleTraffic);
 assert(Math.abs(cityEnvelope.gain.value - 0.28) < 1e-8);
 assert.equal(cityFilter.frequency.value, 2000);
@@ -248,12 +319,37 @@ audio.update({ x: 0, y: 1.64, z: 1 }, { x: 0, y: 0, z: -1 }, sampleTraffic);
 assert(cityEnvelope.gain.value < 0.07);
 assert.equal(cityFilter.frequency.value, 600);
 assert.equal(cityPanners[5].positionX.value, 12, 'Moving engines follow the visible vehicles');
+const untouchedEngineTargets = engines[1].frequency.targets.length;
+audio.update({ x: 0, y: 1.64, z: 13 }, { x: 0, y: 0, z: -1 }, [{ ...sampleTraffic[0], x: 1000 }]);
+assert.equal(engines[0].target.gain.value, 0, 'Distant engines retain their existing fade target');
+assert.equal(cityPanners[1].positionX.value, 1000);
+assert.equal(
+  engines[1].frequency.targets.length,
+  untouchedEngineTargets,
+  'Missing vehicles do not alter other engine automation',
+);
 
 await audio.start();
 assert.equal(contexts.length, 1, 'Resume never stacks a second soundtrack');
 document.hidden = true;
 handlers.get('visibilitychange')();
 assert.equal(contexts[0].state, 'suspended');
+const suspendedTargets = listenerParams.map((param) => param.targets.length);
+const suspendedCityTargets = cityEnvelope.gain.targets.length;
+assert.deepEqual(audio.update({ x: 0, y: 1.64, z: 13 }, { x: 0, y: 0, z: -1 }, sampleTraffic), {
+  gain: 1,
+  cutoff: 9500,
+  zone: 'street',
+});
+assert.deepEqual(
+  listenerParams.map((param) => param.targets.length),
+  suspendedTargets,
+);
+assert.equal(
+  cityEnvelope.gain.targets.length,
+  suspendedCityTargets,
+  'Suspended frames report acoustics without scheduling audio',
+);
 document.hidden = false;
 handlers.get('visibilitychange')();
 await Promise.resolve();

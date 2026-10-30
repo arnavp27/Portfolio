@@ -14,7 +14,8 @@
     "format:check": "prettier --check .",
     "verify": "npm run format:check && npm test && npm run build",
     "check:deploy": "node scripts/check-deployment.mjs",
-    "deploy": "npm run check:deploy && wrangler pages deploy dist --project-name arnavpatil --branch main"
+    "deploy": "npm run check:deploy && wrangler pages deploy dist --project-name arnavpatil --branch main",
+    "benchmark": "node scripts/benchmark.mjs"
   },
   "engines": {
     "node": ">=22.23.4"

@@ -43,6 +43,7 @@ const code = source.declarations('mountExplorer', [
   'keyDown',
   'keyUp',
   'finishComputerReturn',
+  'prepareComputerReturn',
   'leaveComputer',
   'useComputer',
   'walkTo',
@@ -61,16 +62,16 @@ const makeHarness = Function(
  let disposed=false,windowFocused=true,captureStatus='idle',yaw=0,pitch=0,auto=null,target=null,drag=null;
  let running=false,computer='projects',leaveTime=0,transitionTime=1.7,path=[];
  let ready=true,focus=1,booted=false,autoAmount=0,autoDuration=1,autoLook=null;
- let requests=0,releases=0,interactions=0,pointerCaptures=0,clock=100,nextTimer=0,deferredRelease=false;
+ let throwCapture=false,pauseNotices=0,requests=0,releases=0,interactions=0,pointerCaptures=0,focuses=0,clock=100,nextTimer=0,deferredRelease=false;
  const attempts=[],timers=new Map(),keys=new Set(),escape=createEscapeController(),jump=createJumpMotion();
  const finePointer={matches:true},velocity={set:()=>{}},performance={now:()=>clock},width=1280,height=720;
  const document={pointerLockElement:null,hidden:false,exitPointerLock(){releases++;if(!deferredRelease)this.pointerLockElement=null;}};
  const container={
-  focus:()=>{},style:{},getBoundingClientRect:()=>({left:0,top:0,width:800,height:600}),
+  focus:()=>focuses++,style:{},getBoundingClientRect:()=>({left:0,top:0,width:800,height:600}),
   setPointerCapture:()=>pointerCaptures++,
-  requestPointerLock(){requests++;return new Promise((resolve,reject)=>attempts.push({resolve,reject}));},
+  requestPointerLock(){requests++;if(throwCapture)throw new Error('Unavailable');return new Promise((resolve,reject)=>attempts.push({resolve,reject}));},
  };
- const options={sound:{start:()=>Promise.resolve(),play:()=>{}}};
+ const options={sound:{start:()=>Promise.resolve(),play:()=>{}},onPause:()=>pauseNotices++};
  const eyeHeight=1.62,world={isComputerOn:()=>true};
  const player=new T.Vector3(3,eyeHeight,4),view=new T.Vector3(3,eyeHeight,2);
  const fromPosition=new T.Vector3(1,eyeHeight,2),fromTarget=new T.Vector3(1,eyeHeight,0);
@@ -93,9 +94,9 @@ const makeHarness = Function(
   reject(index=attempts.length-1){attempts[index].reject(new Error('Capture denied'));},
   resolve(index=attempts.length-1){attempts[index].resolve();},
   expire(){const callbacks=[...timers.values()];timers.clear();for(const callback of callbacks)callback();},
-  set(state){if('phase'in state)phase=state.phase;if('guided'in state)guided=state.guided;if('paused'in state)paused=state.paused;if('entered'in state)entered=state.entered;if('computer'in state)computer=state.computer;},
+  set(state){if('throwCapture'in state)throwCapture=state.throwCapture;if('phase'in state)phase=state.phase;if('guided'in state)guided=state.guided;if('paused'in state)paused=state.paused;if('entered'in state)entered=state.entered;if('computer'in state)computer=state.computer;if('focus'in state)focus=state.focus;},
   tick(){clock+=100;},
-  state:()=>({focus,computer,pathLength:path.length,player:player.toArray(),standing:fromPosition.toArray(),auto:!!auto,entered,paused,guided,locked,phase,playRequested,captureStatus,yaw,pitch,requests,releases,interactions,pointerCaptures,drag,keys:[...keys],timers:timers.size,nativeLocked:document.pointerLockElement===container}),
+  state:()=>({pauseNotices,focus,computer,pathLength:path.length,player:player.toArray(),view:view.toArray(),standing:fromPosition.toArray(),auto:!!auto,entered,paused,guided,locked,phase,playRequested,captureStatus,yaw,pitch,requests,releases,focuses,interactions,pointerCaptures,drag,keys:[...keys],timers:timers.size,nativeLocked:document.pointerLockElement===container}),
   dispose(){disposed=true;capture.dispose();},
  };
 `,
@@ -135,8 +136,37 @@ const flush = async () => {
 
 {
   const h = harness();
+  h.set({ throwCapture: true });
+  assert.equal(h.resume(), false, 'Synchronous capture rejection must block fullscreen entry');
+  assert(h.state().paused && !h.state().playRequested);
+  assert.equal(h.state().pauseNotices, 1, 'Failure also cancels any previous fullscreen intent');
+  h.set({ throwCapture: false });
+  assert.equal(
+    h.resume(),
+    true,
+    'An accepted fresh request can start fullscreen in the same gesture',
+  );
+  h.dispose();
+}
+
+{
+  const h = harness();
+  h.set({ throwCapture: true });
+  assert.equal(h.walkTo('courtyard'), false);
+  assert.equal(h.state().focuses, 0, 'A denied menu shortcut preserves menu focus');
+  assert(h.state().paused && !h.state().playRequested);
+  h.dispose();
+}
+
+{
+  const h = harness();
   h.resume();
   assert.equal(h.state().captureStatus, 'requesting');
+  assert.equal(
+    h.state().focuses,
+    0,
+    'A pending desktop resume must not steal focus from its button',
+  );
   assert(h.state().paused, 'Desktop play waits for actual capture');
   h.mouseMove(mouse(80));
   h.keyDown(key('w'));
@@ -193,7 +223,9 @@ const flush = async () => {
   h.keyUp(key('Escape'));
   h.tick();
   h.keyDown(key('Escape'));
-  assert.equal(h.state().requests, 2, 'A new Escape can resume after cancellation settles');
+  assert.equal(h.state().requests, 1, 'Escape does not resume desktop gameplay');
+  h.resume();
+  assert.equal(h.state().requests, 2, 'The menu action can resume after cancellation settles');
   assert(h.state().paused, 'Retry still waits for native capture');
   h.grant();
   assert(!h.state().paused);
@@ -298,7 +330,10 @@ for (const phase of ['room', 'leaving']) {
     h.keyUp(key('Escape'));
     h.tick();
     h.keyDown(key('Escape'));
-    assert.equal(h.state().requests, 2, 'The next Escape requests capture once');
+    assert.equal(h.state().requests, 1, 'Another Escape leaves the menu paused');
+    assert(h.state().pauseNotices > 0, 'Pause tells the UI to leave fullscreen');
+    h.resume();
+    assert.equal(h.state().requests, 2, 'The menu action requests capture once');
     h.grant();
     assert(!h.state().paused);
     h.dispose();
@@ -308,7 +343,7 @@ for (const phase of ['room', 'leaving']) {
 {
   const h = harness();
   h.set({ phase: 'using', paused: false });
-  h.keyDown(key('Escape'));
+  h.leaveComputer();
   assert.equal(h.state().phase, 'leaving');
   assert.equal(h.state().requests, 1, 'Leaving either CRT uses the normal capture resume path');
   assert(h.state().paused);
@@ -323,10 +358,80 @@ for (const phase of ['room', 'leaving']) {
   assert.equal(h.state().yaw, returnYaw);
   h.keyUp(key('Escape'));
   h.tick();
-  h.keyDown(key('Escape'));
-  assert.equal(h.state().requests, 2, 'A failed computer-return capture is recoverable');
+  h.resume();
+  assert.equal(h.state().requests, 2, 'A new resume from the existing menu requests capture once');
   h.grant();
   assert(!h.state().paused);
+  h.dispose();
+}
+
+// Pausing from any CRT phase must leave the same resumable room state. This is
+// also the fullscreen-exit path, which can run before a computer handles Escape.
+for (const id of ['kazam', 'projects']) {
+  for (const phase of ['approaching', 'using', 'leaving']) {
+    const h = harness();
+    const origin = h.state().player;
+    const originView = h.state().view;
+    h.useComputer(id);
+    h.set({ phase, focus: phase === 'approaching' ? 0.4 : 1 });
+    if (phase === 'leaving') {
+      h.set({ phase: 'using' });
+      h.leaveComputer();
+    }
+    const requestsBeforePause = h.state().requests;
+    const expectedPosition = phase === 'approaching' ? origin : [id === 'kazam' ? -1 : 0, 1.62, 2];
+    h.pause();
+    const state = h.state();
+    assert.equal(state.phase, 'room', id + ' ' + phase + ': pause releases the computer phase');
+    assert.equal(state.computer, null);
+    assert.equal(state.pathLength, 0);
+    assert.equal(state.focus, 0);
+    assert(state.paused && !state.playRequested && !state.locked);
+    assert.deepEqual(
+      state.player,
+      expectedPosition,
+      phase + ': pause settles at the safe standing position',
+    );
+    assert.equal(state.requests, requestsBeforePause, 'Pause never requests capture');
+    if (phase === 'approaching') assert.deepEqual(state.view, originView);
+    else {
+      assert.deepEqual(state.view, [id === 'kazam' ? -1 : 0, 1.62, 0]);
+      assert(Math.abs(state.yaw) < 0.001 && Math.abs(state.pitch) < 0.001);
+    }
+    h.pause();
+    assert.deepEqual(
+      h.state().player,
+      expectedPosition,
+      'Repeated pause preserves the settled position',
+    );
+    assert.equal(h.state().requests, requestsBeforePause);
+    if (phase === 'leaving') {
+      h.grant();
+      assert(h.state().paused && !h.state().locked, 'A late return capture cannot undo pause');
+    }
+    h.resume();
+    assert.equal(h.state().requests, requestsBeforePause + 1, 'Back to the garage remains usable');
+    h.grant();
+    assert(!h.state().paused && h.state().locked);
+    h.dispose();
+  }
+}
+
+// A rejected explicit resume keeps the desktop paused and the existing
+// menu button usable. A new click/Enter can request capture without another screen.
+{
+  const h = harness();
+  h.resume();
+  h.reject();
+  await flush();
+  assert.equal(h.state().focuses, 0, 'Failed capture preserves menu/retry focus');
+  assert.equal(h.state().captureStatus, 'unavailable');
+  assert.equal(h.state().requests, 1, 'Failure cannot create an automatic capture retry');
+  h.resume();
+  assert.equal(h.state().requests, 2, 'The existing Resume button can retry directly');
+  h.grant();
+  assert.equal(h.state().focuses, 1, 'Only confirmed capture focuses the desktop canvas');
+  assert(!h.state().paused && h.state().locked);
   h.dispose();
 }
 

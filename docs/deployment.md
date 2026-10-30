@@ -46,6 +46,8 @@ This command validates and uploads the existing tested `dist/`; it does not rebu
 
 Content-hashed `/_astro/` assets receive a one-year immutable browser cache. HTML and stable `/assets/` URLs retain Cloudflare's ETag revalidation defaults, so replacements are detected without redownloading unchanged content. Do not make stable asset filenames immutable unless their URLs are versioned as well.
 
+The generated `night-sky.rgba16f.bin` has one exact-path exception in `public/_headers`: it remains revalidated, but is served as `application/octet-stream` with `no-transform` and no `Content-Encoding`. Its gzip bytes are application data decoded by the sky loader. [Cloudflare's header-removal syntax](https://developers.cloudflare.com/pages/configuration/headers/#detach-a-header) and [compression behavior](https://developers.cloudflare.com/speed/optimization/content/compression/#content-compression-from-origin-servers-to-the-cloudflare-network) explain this rule. After publishing, verify that this asset has those headers and retains the gzip signature `1f 8b`; local preview cannot establish production CDN behavior.
+
 `/camera-workshop/` redirects to `/`. Existing reading pages keep their own URLs. The top-level `404.html` makes missing routes return the custom 404 page with HTTP 404 rather than an application fallback. Local `scripts/serve.mjs` is a development preview, not the production server; validate Cloudflare redirects, MIME types, caching and range responses on the public URL.
 
 ## Before sharing

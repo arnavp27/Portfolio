@@ -1,11 +1,12 @@
 import * as T from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { SceneRenderPass } from './scene-render-pass';
+import { optimizeDirectLighting } from './direct-lighting';
+import { loadNightSky } from './night-sky';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { defaultGraphics, normalizeGraphics, type GraphicsSettings } from './graphics-settings';
 
@@ -41,10 +42,10 @@ export function createGarageRendering(
   let samples = msaaSamples();
   const target = new T.WebGLRenderTarget(1, 1, {
     type: T.HalfFloatType,
-    samples,
+    depthBuffer: false,
   });
   const composer = new EffectComposer(renderer, target);
-  const beauty = new RenderPass(scene, camera);
+  const beauty = new SceneRenderPass(scene, camera, samples);
   const ao = new GTAOPass(scene, camera, 1, 1);
   ao.updateGtaoMaterial({
     radius: 0.38,
@@ -67,8 +68,10 @@ export function createGarageRendering(
   const shadows = new Set<T.LightShadow>();
   const shadowBaselines = new WeakMap<T.LightShadow, T.Vector2>();
   const aoRender = ao.render.bind(ao);
+  const hidden: T.Object3D[] = [];
   ao.render = (...args) => {
-    const hidden = aoExcluded.filter((object) => object.visible);
+    hidden.length = 0;
+    for (const object of aoExcluded) if (object.visible) hidden.push(object);
     for (const object of hidden) object.visible = false;
     try {
       aoRender(...args);
@@ -89,44 +92,21 @@ export function createGarageRendering(
   composer.addPass(bloom);
   composer.addPass(antialias);
   composer.addPass(output);
-  const pmrem = new T.PMREMGenerator(renderer),
-    fallbackScene = new RoomEnvironment();
-  let environment = pmrem.fromScene(fallbackScene, 0.06),
+  const pmrem = new T.PMREMGenerator(renderer);
+  let environment: T.WebGLRenderTarget | undefined,
     sky: T.DataTexture | undefined,
     disposed = false;
-  scene.environment = environment.texture;
   scene.environmentIntensity = settings.environmentIntensity;
   scene.background = new T.Color('#101b2f');
-  fallbackScene.dispose();
-  const ready = new HDRLoader()
-    .loadAsync('/assets/garage/surfaces/kloofendal_overcast_puresky-hdri.hdr')
+  const ready = loadNightSky()
     .then((texture) => {
       if (disposed) {
         texture.dispose();
         return;
       }
-      // Regrade the existing cloud detail into an overcast night sky in linear light.
-      // The same sky drives reflections, so surfaces cannot reflect a daylight sky.
-      const pixels = texture.image.data as Uint16Array | Float32Array;
-      const halfFloat = texture.type === T.HalfFloatType;
-      for (let i = 0; i < pixels.length; i += 4) {
-        const r = halfFloat ? T.DataUtils.fromHalfFloat(pixels[i]) : pixels[i];
-        const g = halfFloat ? T.DataUtils.fromHalfFloat(pixels[i + 1]) : pixels[i + 1];
-        const b = halfFloat ? T.DataUtils.fromHalfFloat(pixels[i + 2]) : pixels[i + 2];
-        const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        const cloud = luminance / (1 + luminance);
-        const night = [0.002 + cloud * 0.009, 0.004 + cloud * 0.016, 0.012 + cloud * 0.037];
-        for (let channel = 0; channel < 3; channel++)
-          pixels[i + channel] = halfFloat
-            ? T.DataUtils.toHalfFloat(night[channel])
-            : night[channel];
-      }
-      texture.needsUpdate = true;
-      texture.mapping = T.EquirectangularReflectionMapping;
-      const next = pmrem.fromEquirectangular(texture);
-      environment.dispose();
-      environment = next;
       sky = texture;
+      const next = pmrem.fromEquirectangular(texture);
+      environment = next;
       scene.environment = next.texture;
       scene.background = texture;
       scene.backgroundIntensity = 1.0;
@@ -135,7 +115,17 @@ export function createGarageRendering(
       scene.environmentRotation.y = 0.7;
     })
     .catch((error) => {
-      if (!disposed) console.warn('Using the garage lighting fallback.', error);
+      if (disposed) return;
+      console.warn('Using the garage lighting fallback.', error);
+      // The world waits for ready: successful loads never display a fallback environment.
+      // Build this GPU resource only when the authored sky actually fails to load.
+      const fallback = new RoomEnvironment();
+      try {
+        environment = pmrem.fromScene(fallback, 0.06);
+        scene.environment = environment.texture;
+      } finally {
+        fallback.dispose();
+      }
     });
   let width = 1,
     height = 1,
@@ -249,15 +239,8 @@ export function createGarageRendering(
     const nextSamples = msaaSamples();
     if (samples !== nextSamples) {
       samples = nextSamples;
-      // Sample counts are attachment properties: rebuild only the composer targets.
-      // reset() disposes both old targets and preserves all effect passes/uniforms.
-      composer.reset(
-        new T.WebGLRenderTarget(
-          Math.max(1, width * (appliedDpr || renderDpr())),
-          Math.max(1, height * (appliedDpr || renderDpr())),
-          { type: T.HalfFloatType, samples },
-        ),
-      );
+      // Only the geometry pass needs multisampling. Fullscreen effects use single samples.
+      beauty.setSamples(samples);
     }
     describeRendering();
   }
@@ -280,6 +263,7 @@ export function createGarageRendering(
           aoExcluded.push(object);
         for (const material of objectMaterials) {
           materials.add(material);
+          optimizeDirectLighting(material);
           for (const value of Object.values(material))
             if (value instanceof T.Texture) textures.add(value);
         }
@@ -300,6 +284,9 @@ export function createGarageRendering(
     ready,
     resize,
     prepare,
+    compile() {
+      return beauty.compileAsync(renderer);
+    },
     setSettings,
     render() {
       // Moving between displays can change density without changing the CSS viewport.
@@ -314,7 +301,7 @@ export function createGarageRendering(
       antialias.dispose();
       output.dispose();
       composer.dispose();
-      environment.dispose();
+      environment?.dispose();
       sky?.dispose();
       pmrem.dispose();
       scene.environment = null;

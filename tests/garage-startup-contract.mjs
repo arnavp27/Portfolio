@@ -67,7 +67,7 @@ function deferred() {
   });
   return { promise, resolve, reject };
 }
-function rig() {
+function rig({ compilePromise = Promise.resolve(), compileError } = {}) {
   const room = deferred(),
     hdr = deferred();
   const resource = {
@@ -83,6 +83,13 @@ function rig() {
   const graphics = {
     ready: hdr.promise,
     prepared: 0,
+    compilations: 0,
+    compile() {
+      this.compilations++;
+      assert.equal(this.prepared, 1, 'Prepare lighting and settings before compiling');
+      if (compileError) throw compileError;
+      return compilePromise;
+    },
     prepare() {
       this.prepared++;
     },
@@ -91,7 +98,7 @@ function rig() {
   return { room, hdr, resource, graphics, ...controls };
 }
 
-await test('the room starts only after both geometry and authored lighting are ready', async () => {
+await test('the room starts only after geometry, authored lighting and shader prewarming are ready', async () => {
   const r = rig();
   r.room.resolve(r.resource);
   await flush();
@@ -102,6 +109,7 @@ await test('the room starts only after both geometry and authored lighting are r
   assert.equal(r.state().world, r.resource);
   assert.equal(r.state().wakes, 1);
   assert.equal(r.graphics.prepared, 1);
+  assert.equal(r.graphics.compilations, 1);
   assert.equal(r.resource.rain, true);
   r.dispose();
   assert.equal(r.resource.disposed, 1);
@@ -173,4 +181,93 @@ await test('disposal cancels the readiness deadline and observes later dependenc
   await flush();
   assert.deepEqual(r.state().errors, []);
   assert.equal(r.state().wakes, 0);
+});
+
+await test('shader prewarming holds ownership without activating the world or scheduling a frame', async () => {
+  const compilation = deferred();
+  const r = rig({ compilePromise: compilation.promise });
+  r.room.resolve(r.resource);
+  r.hdr.resolve();
+  await flush();
+  assert.equal(r.graphics.prepared, 1);
+  assert.equal(r.graphics.compilations, 1);
+  assert.equal(r.state().world, undefined);
+  assert.equal(r.state().wakes, 0);
+  assert.equal(r.resource.rain, null);
+  assert.equal(r.resource.disposed, 0);
+  compilation.resolve();
+  await flush();
+  assert.equal(r.state().world, r.resource);
+  assert.equal(r.state().wakes, 1);
+  assert.equal(r.resource.rain, true);
+  r.dispose();
+  assert.equal(r.resource.disposed, 1);
+});
+
+await test('disposal during prewarming releases the pending world and cannot be undone by completion', async () => {
+  for (const outcome of ['resolve', 'reject']) {
+    const compilation = deferred();
+    const r = rig({ compilePromise: compilation.promise });
+    r.room.resolve(r.resource);
+    r.hdr.resolve();
+    await flush();
+    assert.equal(r.graphics.compilations, 1);
+    r.dispose();
+    assert.equal(r.resource.disposed, 1);
+    compilation[outcome](new Error('Late compilation failure'));
+    await flush();
+    assert.equal(r.state().world, undefined);
+    assert.equal(r.state().wakes, 0);
+    assert.deepEqual(r.state().errors, []);
+    assert.equal(r.resource.disposed, 1);
+  }
+});
+
+await test('synchronous and asynchronous compilation failures recover and release the pending world once', async () => {
+  for (const synchronous of [true, false]) {
+    const compilation = deferred();
+    const failure = new Error('Shader prewarm failed');
+    const r = rig(
+      synchronous ? { compileError: failure } : { compilePromise: compilation.promise },
+    );
+    r.room.resolve(r.resource);
+    r.hdr.resolve();
+    await flush();
+    if (!synchronous) compilation.reject(failure);
+    await flush();
+    assert.equal(r.graphics.compilations, 1);
+    assert.equal(r.state().world, undefined);
+    assert.equal(r.state().wakes, 0);
+    assert.deepEqual(r.state().errors, ['load']);
+    assert.equal(r.resource.disposed, 1);
+    r.dispose();
+    assert.equal(r.resource.disposed, 1);
+  }
+});
+
+await test('shader prewarming shares the original 90-second deadline and cannot revive after timeout', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const compilation = deferred();
+  const r = rig({ compilePromise: compilation.promise });
+  t.mock.timers.tick(60_000);
+  r.room.resolve(r.resource);
+  r.hdr.resolve();
+  await flush();
+  assert.equal(r.graphics.compilations, 1);
+  t.mock.timers.tick(29_999);
+  await flush();
+  assert.deepEqual(r.state().errors, []);
+  assert.equal(r.resource.disposed, 0);
+  t.mock.timers.tick(1);
+  await flush();
+  assert.deepEqual(r.state().errors, ['load']);
+  assert.equal(r.resource.disposed, 1);
+  compilation.resolve();
+  await flush();
+  assert.equal(r.state().world, undefined);
+  assert.equal(r.state().wakes, 0);
+  assert.equal(r.resource.rain, null);
+  assert.equal(r.resource.disposed, 1);
+  r.dispose();
+  assert.equal(r.resource.disposed, 1);
 });
