@@ -1,16 +1,32 @@
 import assert from 'node:assert/strict';
 import { createGarageSound } from '../src/lib/garage/sound.ts';
 import { garageAudioClips } from '../src/lib/garage/audio-clips.ts';
+const configuredClips = { ...garageAudioClips };
 assert.deepEqual(
-  garageAudioClips,
-  { alien: null, 'power-on': null, 'power-off': null },
-  'The public build defaults to original synthesized cues',
+  configuredClips,
+  {
+    alien: '/assets/audio/computers/koi-mil-gaya-keyboard.mp3',
+    'power-on': '/assets/audio/computers/windows-xp-startup.mp3',
+    'power-off': '/assets/audio/computers/windows-xp-shutdown.mp3',
+  },
+  'Each physical interaction has its configured recording',
 );
+// Null mappings remain a supported synthesis-only fallback.
+Object.assign(garageAudioClips, { alien: null, 'power-on': null, 'power-off': null });
 const nodes = [],
   contexts = [],
   handlers = new Map(),
-  requests = [];
+  requests = [],
+  decodeGates = new Map();
 const settle = () => new Promise((r) => setTimeout(r, 0));
+function holdDecode(url) {
+  let release;
+  decodeGates.set(url, new Promise((resolve) => (release = resolve)));
+  return () => {
+    decodeGates.delete(url);
+    release();
+  };
+}
 class Param {
   value = 0;
   targets = [];
@@ -97,6 +113,7 @@ class Context {
     return { getChannelData: () => new Float32Array(n) };
   }
   async decodeAudioData(bytes) {
+    await decodeGates.get(bytes.asset);
     return { asset: bytes.asset, music: bytes.asset === '/assets/audio/after-rain.ogg' };
   }
   async resume() {
@@ -196,16 +213,15 @@ assert(
   requests.every((url) => url === '/assets/audio/after-rain.ogg'),
   'Synthesized cues never fetch external recordings',
 );
-// Exercise the optional replacement hook with mocked bytes only; no recordings
-// are bundled or fetched from the network by this test.
-
-for (const cue of ['alien', 'power-on']) {
-  const url = `/assets/audio/computers/test-${cue}.ogg`;
-  garageAudioClips[cue] = url;
+// Exercise all production mappings through mocked fetch/decode; tests never
+// fetch a recording from the network.
+Object.assign(garageAudioClips, configuredClips);
+const clipsFor = (url) => nodes.filter((n) => n.buffer?.asset === url && n.started);
+for (const [cue, url] of Object.entries(configuredClips)) {
   contexts[0].currentTime += 1.1;
   audio.play(cue);
   await settle();
-  const clips = () => nodes.filter((n) => n.buffer?.asset === url && n.started);
+  const clips = () => clipsFor(url);
   const first = clips().at(-1);
   assert(first, `${cue} starts its own recording`);
   assert.equal(
@@ -215,6 +231,7 @@ for (const cue of ['alien', 'power-on']) {
   );
   contexts[0].currentTime += 1.1;
   audio.play(cue);
+  assert(first.stopped, 'Retrigger stops the previous playback immediately');
   await settle();
   const next = clips().at(-1);
   assert.notEqual(next, first);
@@ -225,6 +242,45 @@ for (const cue of ['alien', 'power-on']) {
     'Decoded clips are reused without fetching again',
   );
 }
+// The startup and shutdown channel replaces its current source at request time,
+// including while the next clip is still decoding. Other channels stay intact.
+const keyboardSource = clipsFor(configuredClips.alien).at(-1),
+  previousShutdown = clipsFor(configuredClips['power-off']).at(-1),
+  delayedOnUrl = '/assets/audio/computers/test-delayed-on.mp3',
+  delayedOffUrl = '/assets/audio/computers/test-delayed-off.mp3',
+  releaseOn = holdDecode(delayedOnUrl),
+  releaseOff = holdDecode(delayedOffUrl);
+Object.assign(garageAudioClips, { 'power-on': delayedOnUrl, 'power-off': delayedOffUrl });
+audio.play('power-on');
+assert(previousShutdown.stopped, 'Startup immediately stops an active shutdown cue');
+await settle();
+audio.play('power-off');
+await settle();
+releaseOff();
+await settle();
+assert.equal(clipsFor(delayedOffUrl).length, 1, 'The newest power request starts when ready');
+releaseOn();
+await settle();
+assert.equal(clipsFor(delayedOnUrl).length, 0, 'Late startup decoding cannot override shutdown');
+assert(!keyboardSource.stopped, 'Power changes do not interrupt the keyboard clip channel');
+
+const delayedReplayUrl = '/assets/audio/computers/test-delayed-replay.mp3',
+  releaseReplay = holdDecode(delayedReplayUrl),
+  activeShutdown = clipsFor(delayedOffUrl).at(-1);
+garageAudioClips['power-on'] = delayedReplayUrl;
+audio.play('power-on');
+assert(activeShutdown.stopped, 'Opposing power playback stops before the new decode finishes');
+audio.play('power-on');
+await settle();
+assert.equal(requests.filter((url) => url === delayedReplayUrl).length, 1);
+releaseReplay();
+await settle();
+assert.equal(
+  clipsFor(delayedReplayUrl).length,
+  1,
+  'Rapid same-cue requests share decoding and only the newest request starts',
+);
+Object.assign(garageAudioClips, configuredClips);
 const beforeMute = nodes.length,
   beforeRequests = requests.length;
 audio.setSettings({ muted: true, music: 0.4, effects: 0.6 });
@@ -234,7 +290,17 @@ await settle();
 assert.equal(nodes.length, beforeMute);
 assert.equal(requests.length, beforeRequests, 'Muted cues do not fetch or start recordings');
 audio.setSettings({ muted: false, music: 0.4, effects: 0.6 });
-Object.assign(garageAudioClips, { alien: null, 'power-on': null, 'power-off': null });
+const mutedPendingUrl = '/assets/audio/computers/test-muted-pending.mp3',
+  releaseMuted = holdDecode(mutedPendingUrl);
+garageAudioClips['power-on'] = mutedPendingUrl;
+audio.play('power-on');
+await settle();
+audio.setSettings({ muted: true, music: 0.4, effects: 0.6 });
+releaseMuted();
+await settle();
+assert.equal(clipsFor(mutedPendingUrl).length, 0, 'Muting during decode prevents late playback');
+audio.setSettings({ muted: false, music: 0.4, effects: 0.6 });
+Object.assign(garageAudioClips, configuredClips);
 // Fan power follows each physical tower; it never silences the other machine or city.
 const fanPanners = nodes.filter(
   (n) => n.kind === 'panner' && n.maxDistance === 20 && [1.04, -2.47].includes(n.positionZ.value),
@@ -354,7 +420,16 @@ document.hidden = false;
 handlers.get('visibilitychange')();
 await Promise.resolve();
 assert.equal(contexts[0].state, 'running');
+const disposedPendingUrl = '/assets/audio/computers/test-disposed-pending.mp3',
+  releaseDisposed = holdDecode(disposedPendingUrl);
+garageAudioClips['power-on'] = disposedPendingUrl;
+audio.play('power-on');
+await settle();
 audio.dispose();
+releaseDisposed();
+await settle();
+assert.equal(clipsFor(disposedPendingUrl).length, 0, 'Disposal prevents late decoded playback');
+Object.assign(garageAudioClips, configuredClips);
 assert.equal(contexts[0].state, 'closed');
 assert.equal(handlers.size, 0);
 assert(
@@ -362,5 +437,5 @@ assert(
   'Every looping source stops on disposal',
 );
 console.log(
-  'PASS: gesture-only startup, looping BGM, every SFX, synthesized defaults, optional clip cache/retrigger, mute, reading duck, spatial listener, tab suspension and disposal.',
+  'PASS: gesture-only startup, looping BGM, every SFX, synthesis fallback, all configured clips, cache/retrigger, power ordering, mute, reading duck, spatial listener, tab suspension and disposal.',
 );

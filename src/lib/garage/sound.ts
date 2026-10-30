@@ -14,6 +14,7 @@ export type SoundEffect =
   | 'power-on'
   | 'power-off'
   | 'alien';
+type ClipChannel = 'alien' | 'power';
 export type SoundSettings = { muted: boolean; music: number; effects: number };
 export const defaultSound: SoundSettings = { muted: false, music: 0.3, effects: 0.65 };
 /** One audio graph per room. Starts only from Enter/Resume, and suspends off-tab. */
@@ -32,7 +33,8 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
   const fans: Partial<Record<ComputerId, GainNode>> = {},
     computerPower = { kazam: true, projects: true };
   const clipBuffers = new Map<string, Promise<AudioBuffer>>(),
-    clipSources = new Map<ClipCue, AudioBufferSourceNode>();
+    clipSources = new Map<ClipChannel, AudioBufferSourceNode>(),
+    clipGenerations = new Map<ClipChannel, number>();
   let lastSignal = -Infinity;
   const sources: AudioScheduledSourceNode[] = [],
     panners: PannerNode[] = [];
@@ -206,6 +208,17 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
   async function playClip(cue: ClipCue, url: string) {
     const activeContext = context;
     if (!activeContext) return;
+    // Opposing power cues share one channel. Invalidate before decoding so an
+    // earlier, slower request cannot play after a more recent switch press.
+    const channel: ClipChannel = cue === 'alien' ? 'alien' : 'power',
+      generation = (clipGenerations.get(channel) ?? 0) + 1;
+    clipGenerations.set(channel, generation);
+    const previous = clipSources.get(channel);
+    try {
+      previous?.stop();
+    } catch {}
+    previous?.disconnect();
+    clipSources.delete(channel);
     try {
       let pending = clipBuffers.get(url);
       if (!pending) {
@@ -221,21 +234,18 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
       if (
         closed ||
         context !== activeContext ||
+        clipGenerations.get(channel) !== generation ||
         settings.muted ||
         activeContext.state !== 'running'
       )
         return;
-      const previous = clipSources.get(cue);
-      try {
-        previous?.stop();
-      } catch {}
       const source = activeContext.createBufferSource();
       source.buffer = buffer;
       source.connect(effects!);
-      clipSources.set(cue, source);
+      clipSources.set(channel, source);
       source.onended = () => {
         source.disconnect();
-        if (clipSources.get(cue) === source) clipSources.delete(cue);
+        if (clipSources.get(channel) === source) clipSources.delete(channel);
       };
       source.start();
     } catch {
@@ -257,7 +267,7 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
         return;
       }
     }
-    // Original synthesized cues are the defaults; optional clips can override them.
+    // Null clip mappings retain the original synthesized cues.
     if (kind === 'power-on') {
       burst(t, 0.22, 0.09, 3400, effects);
       [262, 330, 523].forEach((hz, i) =>
@@ -348,6 +358,7 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
         s.disconnect();
       });
       clipSources.clear();
+      clipGenerations.clear();
       clipBuffers.clear();
       city?.dispose();
       city = null;

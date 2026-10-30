@@ -15,7 +15,7 @@ The homepage is a first-person Three.js garage in a fictional Koramangala street
 | `src/lib/garage/navigation.ts`, `interaction.ts`                           | Collision/path planning and projection of HTML onto monitor glass                                        |
 | `src/lib/garage/world.ts`, `city/`, `foliage.ts`                           | Room geometry, street/vehicles, plants and interaction targets                                           |
 | `src/lib/garage/rendering.ts`, `environment.ts`, `src/lib/graphics/`       | Render resolution, postprocessing, lighting and generated textures                                       |
-| `src/lib/garage/sound.ts`, `city/soundscape.ts`, `audio-clips.ts`          | One audio graph, spatial ambience, original SFX and optional clip mappings                               |
+| `src/lib/garage/sound.ts`, `city/soundscape.ts`, `audio-clips.ts`          | One audio graph, spatial ambience, synthesized SFX and computer recordings                               |
 | `src/content/`, `src/content.config.ts`                                    | Markdown and validated metadata                                                                          |
 | `src/pages/work/`, `notes/`, `resume.astro`                                | Static reading routes independent of WebGL                                                               |
 

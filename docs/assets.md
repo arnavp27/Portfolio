@@ -34,8 +34,18 @@ No open-source license has been selected for the project's own code or written c
 
 ## Audio
 
-`public/assets/audio/after-rain.ogg` is an original 48-second ambient composition. The generator is `scripts/compose-garage-music.mjs`; it uses oscillators and synthesis, without third-party samples. Computer startup/shutdown, keyboard interaction, footsteps, switches, fans and street ambience use original synthesized sounds. Film and Windows recordings are not bundled.
+`public/assets/audio/after-rain.ogg` is an original 48-second ambient composition. The generator is `scripts/compose-garage-music.mjs`; it uses oscillators and synthesis, without third-party samples. UI key clicks, monitor static, footsteps, switches, fans and street ambience use original synthesized sounds.
 
 To regenerate the music, run `node scripts/compose-garage-music.mjs /path/to/after-rain.wav`. An omitted output path writes to the operating system's temporary directory. Encoding the resulting WAV to Ogg requires FFmpeg; FFmpeg is an optional authoring tool, not a runtime or website-build dependency.
 
-Optional replacement clips are configured in `src/lib/garage/audio-clips.ts`. The default mappings are `null`, which selects synthesis without fetching a recording. To use a recording you have permission to redistribute, place an optimized file under `public/assets/audio/`, document its source/license here, and replace the appropriate `alien`, `power-on` or `power-off` mapping with its `/assets/audio/...` URL. All clips share the existing mute and SFX controls.
+Arnav supplied the following computer recordings. The runtime MP3s live in `public/assets/audio/computers/`; their source videos remain unchanged outside the repository.
+
+| Runtime file                | Source video                                             | Duration | Bytes  | Trigger                                                              |
+| --------------------------- | -------------------------------------------------------- | -------- | ------ | -------------------------------------------------------------------- |
+| `windows-xp-startup.mp3`    | `Microsoft Windows XP Startup Sound.webm`                | 4.90 s   | 80,708 | Powering on either computer, including the shared computer switch    |
+| `windows-xp-shutdown.mp3`   | `Microsoft Windows XP Shutdown - Sound Effect (HD).webm` | 4.03 s   | 60,044 | Powering off either computer, including the shared computer switch   |
+| `koi-mil-gaya-keyboard.mp3` | `koi mil Gaya Tune For Computer.webm`                    | 4.82 s   | 91,964 | Interacting with the physical keyboard of either powered-on computer |
+
+Each file retains the full supplied audio, with no trimming, speed change or volume adjustment. FFmpeg extracts the first audio stream, removes video/subtitles/data and source metadata, and encodes with `libmp3lame -q:a 2`. The outputs contain one stereo MP3 stream at 48 kHz. These are user-supplied third-party recordings, not original or CC0 audio; inclusion does not grant a general license to reuse them.
+
+`src/lib/garage/audio-clips.ts` maps the three interactions to local files. Setting a mapping to `null` selects its original synthesized cue. Recordings load on their first interaction, reuse the decoded buffer, and share the existing mute and SFX controls. Startup and shutdown share one playback channel so a newer power action replaces the previous sound; keyboard playback is separate. Opening a monitor's desktop retains its brief static effect and does not replay the power-on recording.
