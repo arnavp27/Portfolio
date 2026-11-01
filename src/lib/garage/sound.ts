@@ -1,20 +1,19 @@
 import { garageAudioClips, type ClipCue } from './audio-clips.ts';
+import { keyboardNotes, keyboardSampleUrl, type KeyboardNoteId } from './keyboard-notes.ts';
 import type { ComputerId } from './computers';
 import { createCitySoundscape } from './city/soundscape.ts';
 import { cityAcousticsAt, type TrafficPosition } from './city/layout.ts';
 type Position = { x: number; y: number; z: number };
 export type SoundEffect =
-  | 'key'
-  | 'boot'
-  | 'ready'
-  | 'switch'
-  | 'car'
-  | 'chair'
-  | 'step'
-  | 'power-on'
-  | 'power-off'
-  | 'alien';
-type ClipChannel = 'alien' | 'power';
+  'key' | 'boot' | 'ready' | 'switch' | 'car' | 'chair' | 'step' | 'power-on' | 'power-off';
+type KeyboardVoice = {
+  computer: ComputerId;
+  source: AudioBufferSourceNode;
+  envelope: GainNode;
+  startedAt: number;
+  duration: number;
+  release: number;
+};
 export type SoundSettings = { muted: boolean; music: number; effects: number };
 export const defaultSound: SoundSettings = { muted: false, music: 0.3, effects: 0.65 };
 /** One audio graph per room. Starts only from Enter/Resume, and suspends off-tab. */
@@ -32,10 +31,14 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
   let city: ReturnType<typeof createCitySoundscape> | null = null;
   const fans: Partial<Record<ComputerId, GainNode>> = {},
     computerPower = { kazam: true, projects: true };
-  const clipBuffers = new Map<string, Promise<AudioBuffer>>(),
-    clipSources = new Map<ClipChannel, AudioBufferSourceNode>(),
-    clipGenerations = new Map<ClipChannel, number>();
-  let lastSignal = -Infinity;
+  const clipBuffers = new Map<string, Promise<AudioBuffer>>();
+  let powerSource: AudioBufferSourceNode | null = null,
+    powerGeneration = 0,
+    keyboardGeneration = 0,
+    keyboardPendingComputer: ComputerId | null = null,
+    keyboardBuffer: AudioBuffer | null = null,
+    keyboardVoice: KeyboardVoice | null = null,
+    keyboardRelease: KeyboardVoice | null = null;
   const sources: AudioScheduledSourceNode[] = [],
     panners: PannerNode[] = [];
   function gain(value: number, target: AudioNode) {
@@ -133,6 +136,8 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
   const visibility = () => {
     if (!context) return;
     if (document.hidden) {
+      invalidatePendingClips();
+      stopKeyboard();
       void context.suspend();
       report('suspended');
     } else if (!closed) {
@@ -199,71 +204,172 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
           .catch(() => report('effects-only'));
       }
       await context.resume();
+      // A single bank is fetched/decoded after the entry gesture, ahead of a
+      // visitor reaching either keyboard. It is shared by all four notes.
+      if (!closed) void prepareKeyboardBank().catch(() => {});
       apply();
       report(context.state);
     } catch {
       report('unavailable');
     }
   }
-  async function playClip(cue: ClipCue, url: string) {
+  function loadClip(url: string) {
+    let pending = clipBuffers.get(url);
+    if (!pending) {
+      const activeContext = context!;
+      pending = fetch(url)
+        .then((r) => {
+          if (!r.ok) throw Error('Clip unavailable');
+          return r.arrayBuffer();
+        })
+        .then((b) => activeContext.decodeAudioData(b));
+      clipBuffers.set(url, pending);
+      // A failed preload can be retried by a later physical key press.
+      void pending.catch(() => {
+        if (clipBuffers.get(url) === pending) clipBuffers.delete(url);
+      });
+    }
+    return pending;
+  }
+  function canPlay(activeContext = context) {
+    return (
+      activeContext !== null &&
+      context === activeContext &&
+      activeContext.state === 'running' &&
+      !document.hidden &&
+      !settings.muted &&
+      !closed &&
+      effects !== null
+    );
+  }
+  function invalidatePendingClips() {
+    powerGeneration++;
+    keyboardGeneration++;
+    keyboardPendingComputer = null;
+  }
+  async function prepareKeyboardBank() {
+    if (keyboardBuffer) return keyboardBuffer;
+    const activeContext = context,
+      buffer = await loadClip(keyboardSampleUrl);
+    if (!closed && context === activeContext) keyboardBuffer = buffer;
+    return buffer;
+  }
+  function stopVoice(voice: KeyboardVoice | null) {
+    if (!voice) return;
+    try {
+      voice.source.stop();
+    } catch {}
+    voice.source.disconnect();
+    voice.envelope.disconnect();
+  }
+  function stopKeyboard(computer?: ComputerId) {
+    if (!computer || keyboardPendingComputer === computer) {
+      keyboardGeneration++;
+      keyboardPendingComputer = null;
+    }
+    if (!computer || keyboardVoice?.computer === computer) {
+      stopVoice(keyboardVoice);
+      keyboardVoice = null;
+    }
+    if (!computer || keyboardRelease?.computer === computer) {
+      stopVoice(keyboardRelease);
+      keyboardRelease = null;
+    }
+  }
+  function soundKeyboardNote(note: KeyboardNoteId, computer: ComputerId, buffer: AudioBuffer) {
+    const c = context!,
+      time = c.currentTime,
+      { offset, duration } = keyboardNotes[note];
+    // At most one playing note and one 8 ms release tail. Retriggering is
+    // immediate; a short release prevents a discontinuity in the old waveform.
+    stopVoice(keyboardRelease);
+    keyboardRelease = keyboardVoice;
+    if (keyboardRelease) {
+      const previous = keyboardRelease,
+        elapsed = Math.max(0, time - previous.startedAt),
+        level = Math.max(
+          0,
+          Math.min(1, elapsed / 0.004, (previous.duration - elapsed) / previous.release),
+        );
+      previous.envelope.gain.cancelScheduledValues(time);
+      previous.envelope.gain.setValueAtTime(level, time);
+      previous.envelope.gain.linearRampToValueAtTime(0, time + 0.008);
+      previous.source.stop(time + 0.008);
+    }
+    const source = c.createBufferSource(),
+      envelope = c.createGain(),
+      release = Math.min(0.03, duration * 0.05),
+      voice = { computer, source, envelope, startedAt: time, duration, release };
+    source.buffer = buffer;
+    envelope.gain.setValueAtTime(0, time);
+    envelope.gain.linearRampToValueAtTime(1, time + 0.004);
+    envelope.gain.setValueAtTime(1, time + duration - release);
+    envelope.gain.linearRampToValueAtTime(0, time + duration);
+    source.connect(envelope);
+    envelope.connect(effects!);
+    keyboardVoice = voice;
+    source.onended = () => {
+      source.disconnect();
+      envelope.disconnect();
+      if (keyboardVoice === voice) keyboardVoice = null;
+      if (keyboardRelease === voice) keyboardRelease = null;
+    };
+    source.start(time, offset, duration);
+  }
+  function playKeyboardNote(note: KeyboardNoteId, computer: ComputerId) {
+    const activeContext = context;
+    if (!canPlay(activeContext) || !computerPower[computer] || !keyboardNotes[note]) return;
+    const generation = ++keyboardGeneration;
+    keyboardPendingComputer = null;
+    if (keyboardBuffer) {
+      soundKeyboardNote(note, computer, keyboardBuffer);
+      return;
+    }
+    keyboardPendingComputer = computer;
+    void prepareKeyboardBank()
+      .then((buffer) => {
+        if (generation !== keyboardGeneration) return;
+        keyboardPendingComputer = null;
+        if (canPlay(activeContext) && computerPower[computer])
+          soundKeyboardNote(note, computer, buffer);
+      })
+      .catch(() => {
+        if (generation === keyboardGeneration) keyboardPendingComputer = null;
+      });
+  }
+  async function playPowerClip(url: string) {
     const activeContext = context;
     if (!activeContext) return;
     // Opposing power cues share one channel. Invalidate before decoding so an
     // earlier, slower request cannot play after a more recent switch press.
-    const channel: ClipChannel = cue === 'alien' ? 'alien' : 'power',
-      generation = (clipGenerations.get(channel) ?? 0) + 1;
-    clipGenerations.set(channel, generation);
-    const previous = clipSources.get(channel);
+    const generation = ++powerGeneration;
     try {
-      previous?.stop();
+      powerSource?.stop();
     } catch {}
-    previous?.disconnect();
-    clipSources.delete(channel);
+    powerSource?.disconnect();
+    powerSource = null;
     try {
-      let pending = clipBuffers.get(url);
-      if (!pending) {
-        pending = fetch(url)
-          .then((r) => {
-            if (!r.ok) throw Error('Clip unavailable');
-            return r.arrayBuffer();
-          })
-          .then((b) => activeContext.decodeAudioData(b));
-        clipBuffers.set(url, pending);
-      }
-      const buffer = await pending;
-      if (
-        closed ||
-        context !== activeContext ||
-        clipGenerations.get(channel) !== generation ||
-        settings.muted ||
-        activeContext.state !== 'running'
-      )
-        return;
+      const buffer = await loadClip(url);
+      if (generation !== powerGeneration || !canPlay(activeContext)) return;
       const source = activeContext.createBufferSource();
       source.buffer = buffer;
       source.connect(effects!);
-      clipSources.set(channel, source);
+      powerSource = source;
       source.onended = () => {
         source.disconnect();
-        if (clipSources.get(channel) === source) clipSources.delete(channel);
+        if (powerSource === source) powerSource = null;
       };
       source.start();
-    } catch {
-      clipBuffers.delete(url);
-    }
+    } catch {}
   }
   function play(kind: SoundEffect) {
-    if (!context || context.state !== 'running' || !effects || settings.muted || closed) return;
+    if (!canPlay() || !context || !effects) return;
     const t = context.currentTime;
-    if (kind === 'alien') {
-      if (t - lastSignal < 1) return;
-      lastSignal = t;
-    }
     if (kind in garageAudioClips) {
       const cue = kind as ClipCue,
         url = garageAudioClips[cue];
       if (url) {
-        void playClip(cue, url);
+        void playPowerClip(url);
         return;
       }
     }
@@ -277,10 +383,6 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
     if (kind === 'power-off') {
       [392, 294, 196].forEach((hz, i) => tone(hz, t + i * 0.13, 0.3, 0.035, effects!, 'sine'));
       burst(t + 0.42, 0.08, 0.05, 800, effects);
-    }
-    if (kind === 'alien') {
-      tone(740, t, 0.15, 0.035, effects, 'sine', 810);
-      tone(1110, t + 0.22, 0.26, 0.025, effects, 'sine', 990);
     }
     if (kind === 'key') {
       if (t - lastKey < 0.035) return;
@@ -321,11 +423,17 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
   return {
     start,
     play,
+    playKeyboardNote,
     setComputerPower: (id: ComputerId, on: boolean) => {
       computerPower[id] = on;
+      if (!on) stopKeyboard(id);
       if (context) fans[id]?.gain.setTargetAtTime(on ? 1 : 0, context.currentTime, 0.12);
     },
     setSettings: (value: SoundSettings) => {
+      if (value.muted && !settings.muted) {
+        invalidatePendingClips();
+        stopKeyboard();
+      }
       settings = { ...value };
       apply();
     },
@@ -351,14 +459,14 @@ export function createGarageSound(report: (state: string) => void = () => {}) {
     },
     dispose: () => {
       closed = true;
-      clipSources.forEach((s) => {
-        try {
-          s.stop();
-        } catch {}
-        s.disconnect();
-      });
-      clipSources.clear();
-      clipGenerations.clear();
+      invalidatePendingClips();
+      stopKeyboard();
+      keyboardBuffer = null;
+      try {
+        powerSource?.stop();
+      } catch {}
+      powerSource?.disconnect();
+      powerSource = null;
       clipBuffers.clear();
       city?.dispose();
       city = null;

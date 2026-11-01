@@ -3,6 +3,11 @@ import * as T from 'three';
 import { productionSource } from './helpers/production-source.mjs';
 import { createPointerCapture } from '../src/lib/garage/pointer-capture.ts';
 import {
+  keyboardNoteAction,
+  keyboardNoteFromKey,
+  parseKeyboardTarget,
+} from '../src/lib/garage/keyboard-notes.ts';
+import {
   createEscapeController,
   createJumpMotion,
   beginJump,
@@ -56,6 +61,9 @@ const makeHarness = Function(
   'acceptsMovement',
   'lookMode',
   'mouseSensitivity',
+  'keyboardNoteAction',
+  'keyboardNoteFromKey',
+  'parseKeyboardTarget',
   'T',
   `
  let entered=true,paused=true,guided=false,locked=false,phase='room',playRequested=false;
@@ -110,6 +118,9 @@ const harness = () =>
     acceptsMovement,
     lookMode,
     mouseSensitivity,
+    keyboardNoteAction,
+    keyboardNoteFromKey,
+    parseKeyboardTarget,
     T,
   );
 const key = (value, options = {}) => ({

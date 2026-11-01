@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import ts from 'typescript';
 import {
   createEscapeController,
   lookMode,
@@ -12,6 +13,12 @@ import {
   mouseSensitivity,
 } from '../src/lib/garage/player-controls.ts';
 import { isWalkable } from '../src/lib/garage/navigation.ts';
+import {
+  keyboardNoteIds,
+  keyboardNoteAction,
+  keyboardNoteFromKey,
+  parseKeyboardTarget,
+} from '../src/lib/garage/keyboard-notes.ts';
 const initial = () => ({
   entered: true,
   paused: false,
@@ -200,6 +207,34 @@ for (const [event, name] of [
   ['mousemove', 'mouseMove'],
 ])
   explorer.assertListener('mountExplorer', event, name);
+// Read the actual final draw-loop condition rather than duplicating it. A
+// reduced-motion key press needs its release frame, then rendering must sleep.
+const drawSource = ts.createSourceFile('draw.js', handler('draw'), ts.ScriptTarget.Latest, true),
+  drawBody = drawSource.statements.find(ts.isFunctionDeclaration).body,
+  schedule = drawBody.statements.findLast(ts.isIfStatement);
+assert(schedule.thenStatement.getText(drawSource).includes('requestAnimationFrame(draw)'));
+const schedulesFrame = Function(
+  'state',
+  `const {entered=true,paused=false,phase='room',reduced=true,activeKeys=false}=state;
+   const keys=new Set(),auto=null,velocity={length:()=>0},jump={grounded:true,landing:0};
+   const world={hasActiveKeyPresses:()=>activeKeys};
+   return ${schedule.expression.getText(drawSource)};`,
+);
+assert.equal(schedulesFrame({ activeKeys: false }), false);
+assert.equal(
+  schedulesFrame({ activeKeys: true }),
+  true,
+  'A pressed key redraws during reduced motion',
+);
+assert.equal(schedulesFrame({ activeKeys: false }), false, 'Released keys return the room to idle');
+for (const state of [{ entered: false }, { paused: true }, { phase: 'using' }])
+  assert.equal(
+    schedulesFrame({ activeKeys: true, ...state }),
+    false,
+    'Key animations cannot wake an inactive scene',
+  );
+assert.equal(schedulesFrame({ reduced: false }), true, 'Normal room motion continues as before');
+for (const phase of ['approaching', 'leaving']) assert.equal(schedulesFrame({ phase }), true);
 const eventHarness = Function(
   'createEscapeController',
   'lookMode',
@@ -207,26 +242,35 @@ const eventHarness = Function(
   'createJumpMotion',
   'beginJump',
   'mouseSensitivity',
+  'keyboardNoteAction',
+  'keyboardNoteFromKey',
+  'parseKeyboardTarget',
   `
- let entered=true,paused=false,guided=false,locked=true,phase='room',yaw=0,pitch=0,auto=null,captures=0,interactions=0,running=false,captureStatus='locked';
+ let entered=true,paused=false,guided=false,locked=true,phase='room',yaw=0,pitch=0,auto=null,captures=0,interactions=0,running=false,captureStatus='locked',target=null;
+ const noteActions=[],power={kazam:true,projects:true},world={isComputerOn:id=>power[id]};
  const keys=new Set(),jump=createJumpMotion(),escape=createEscapeController();
  const container={contains:node=>node==='canvas',getBoundingClientRect:()=>({left:0,top:0,width:800,height:600})},inputState=()=>({entered,paused,guided,locked,phase});
  const T={MathUtils:{clamp:(value,min,max)=>Math.min(max,Math.max(min,value))}};
- const wake=()=>{},pause=()=>{paused=true;},resume=()=>{paused=false;},leaveComputer=()=>{phase='leaving';captures++;},interact=()=>interactions++;
+ const wake=()=>{},pause=()=>{paused=true;},resume=()=>{paused=false;},leaveComputer=()=>{phase='leaving';captures++;},interact=action=>{interactions++;noteActions.push(action);};
  ${handler('keyDown')}
  ${handler('keyUp')}
  ${handler('mouseMove')}
- return {keyDown,keyUp,mouseMove,jump,set:s=>{if('phase'in s)phase=s.phase;if('paused'in s)paused=s.paused;if('guided'in s)guided=s.guided;if('locked'in s)locked=s.locked;},get:()=>({paused,phase,yaw,captures,interactions,running,keys:[...keys]})};
+ return {keyDown,keyUp,mouseMove,jump,set:s=>{if('phase'in s)phase=s.phase;if('paused'in s)paused=s.paused;if('guided'in s)guided=s.guided;if('locked'in s)locked=s.locked;if('entered'in s)entered=s.entered;if('target'in s)target=s.target;if('power'in s)Object.assign(power,s.power);if('auto'in s)auto=s.auto;},get:()=>({paused,phase,yaw,pitch,locked,auto,captures,interactions,running,noteActions:[...noteActions],keys:[...keys]})};
 `,
 );
-const live = eventHarness(
-  createEscapeController,
-  lookMode,
-  acceptsMovement,
-  createJumpMotion,
-  beginJump,
-  mouseSensitivity,
-);
+const makeEvents = () =>
+  eventHarness(
+    createEscapeController,
+    lookMode,
+    acceptsMovement,
+    createJumpMotion,
+    beginJump,
+    mouseSensitivity,
+    keyboardNoteAction,
+    keyboardNoteFromKey,
+    parseKeyboardTarget,
+  );
+const live = makeEvents();
 const key = (key, options = {}) => ({
   key,
   repeat: false,
@@ -314,11 +358,100 @@ console.log(
   'PASS: production Escape/mouse/key handlers, capture-on-exit call site, relative look, focused UI, held Space/E, and approach jump suppression.',
 );
 
+// Numeric notes are a contextual room shortcut, not a global keyboard listener.
+for (const id of ['kazam', 'projects']) {
+  for (const target of [id + '-keyboard', keyboardNoteAction(id, '3')]) {
+    const h = makeEvents(),
+      auto = [{ x: 0, z: 1 }];
+    h.set({ target, auto });
+    const before = h.get();
+    for (const note of keyboardNoteIds) {
+      const event = key(note);
+      h.keyDown(event);
+      assert(event.defaultPrevented, 'An eligible note is handled by the physical keyboard');
+      h.keyUp(key(note));
+    }
+    const result = h.get();
+    assert.deepEqual(
+      result.noteActions,
+      keyboardNoteIds.map((note) => keyboardNoteAction(id, note)),
+    );
+    assert.equal(result.phase, 'room', 'Playing notes never opens a computer');
+    assert.equal(result.captures, before.captures, 'Playing notes never requests mouse capture');
+    assert.equal(result.locked, before.locked);
+    assert.equal(result.yaw, before.yaw);
+    assert.equal(result.pitch, before.pitch);
+    assert.equal(result.auto, auto, 'Note shortcuts do not replace the current walking path');
+    assert.deepEqual(result.keys, [], 'Note keys never become movement keys');
+  }
+  for (const state of [
+    { entered: false },
+    { paused: true },
+    { locked: false },
+    { guided: true, locked: false },
+    { phase: 'approaching' },
+    { phase: 'using' },
+    { phase: 'leaving' },
+    { power: { [id]: false } },
+  ]) {
+    const h = makeEvents();
+    h.set({ target: id + '-keyboard', ...state });
+    for (const note of keyboardNoteIds) {
+      const event = key(note);
+      h.keyDown(event);
+      assert(!event.defaultPrevented, 'Ineligible note shortcuts leave browser input untouched');
+    }
+    assert.equal(h.get().interactions, 0, 'Inactive or unpowered keyboards reject numeric notes');
+  }
+}
+for (const options of [
+  { repeat: true },
+  { shiftKey: true },
+  { ctrlKey: true },
+  { metaKey: true },
+  { altKey: true },
+  { target: { closest: () => true } },
+]) {
+  const h = makeEvents();
+  h.set({ target: 'kazam-keyboard' });
+  const event = key('1', options);
+  h.keyDown(event);
+  assert(!event.defaultPrevented);
+  assert.equal(h.get().interactions, 0, 'Repeats, modifiers and focused UI never trigger notes');
+}
+for (const target of [null, 'kazam', 'projects', 'kazam-power', 'solar']) {
+  const h = makeEvents();
+  h.set({ target });
+  const event = key('1');
+  h.keyDown(event);
+  assert(!event.defaultPrevented);
+  assert.equal(h.get().interactions, 0, 'Numeric notes require a keyboard under the crosshair');
+}
+for (const digit of ['0', '5', '9', '!']) {
+  const h = makeEvents();
+  h.set({ target: 'kazam-keyboard' });
+  const event = key(digit);
+  h.keyDown(event);
+  assert(!event.defaultPrevented);
+  assert.equal(h.get().interactions, 0, 'Only the four labelled note shortcuts are handled');
+}
+{
+  const h = makeEvents();
+  h.set({ target: 'kazam-keyboard' });
+  h.keyDown(key('1', { defaultPrevented: true }));
+  assert.equal(h.get().interactions, 0, 'Already-handled input cannot play another note');
+}
+console.log(
+  'PASS: contextual numeric notes for both PCs, powered target checks, input guards, and unchanged camera/capture/movement.',
+);
+
 const { createGaragePower } = await import('../src/lib/garage/power.ts');
 const interactionHarness = Function(
   'createGaragePower',
+  'keyboardNoteAction',
+  'parseKeyboardTarget',
   `
- const circuit=createGaragePower(),calls=[],sounds=[],fans=[];
+ const circuit=createGaragePower(),calls=[],sounds=[],notes=[],fans=[];
  let entered=true,paused=false,phase='room',ready=true,computer=null,target=null,focus=0,booted=false,auto=null,path=[],transitionTime=0,inspections=0;
  const width=1280,height=720,player={x:0,z:5},view={},fromPosition={copy:()=>{}},fromTarget={copy:()=>{}};
  const renderer={shadowMap:{needsUpdate:false}},pointer={set:()=>{}},camera={};let hit=null;
@@ -330,17 +463,18 @@ const interactionHarness = Function(
   else if(action==='kazam-power')circuit.toggleComputer('kazam');
   else if(action==='projects-power')circuit.toggleComputer('projects');
  }};
- const options={sound:{play:kind=>sounds.push(kind),setComputerPower:(id,on)=>fans.push([id,on])},onInspect:()=>inspections++};
+ const options={sound:{play:kind=>sounds.push(kind),playKeyboardNote:(note,computer)=>notes.push({note,computer}),setComputerPower:(id,on)=>fans.push([id,on])},onInspect:()=>inspections++};
  const computerPose=id=>({position:{x:id==='kazam'?-1.2:.12,z:id==='kazam'?2.05:-.91}});
  const walkingPath=(from,to)=>[{...from},{...to}],setPhase=next=>{phase=next},unlock=()=>{},clearInput=()=>{},resetJump=()=>{},emit=()=>{},wake=()=>{},pause=()=>{paused=true},leaveComputer=()=>{phase='leaving'};
  ${handler('actionHit')}
  ${handler('applyPower')}
  ${handler('interact')}
  ${handler('useComputer')}
- return {interact,useComputer,actionHit,clear:()=>{calls.length=0;sounds.length=0;fans.length=0;renderer.shadowMap.needsUpdate=false;},setHit:(action,parentAction=null,distance=1)=>{hit={distance,object:{userData:{action},parent:parentAction?{userData:{action:parentAction},parent:null}:null}};},set:s=>{if('paused'in s)paused=s.paused;if('phase'in s)phase=s.phase;},get:()=>({phase,computer,power:circuit.snapshot(),calls:[...calls],sounds:[...sounds],fans:[...fans],shadows:renderer.shadowMap.needsUpdate,inspections})};
+ return {interact,useComputer,actionHit,clear:()=>{calls.length=0;sounds.length=0;notes.length=0;fans.length=0;renderer.shadowMap.needsUpdate=false;},setHit:(action,parentAction=null,distance=1)=>{hit={distance,object:{userData:{action},parent:parentAction?{userData:{action:parentAction},parent:null}:null}};},set:s=>{if('paused'in s)paused=s.paused;if('phase'in s)phase=s.phase;},get:()=>({phase,computer,power:circuit.snapshot(),calls:[...calls],sounds:[...sounds],notes:[...notes],fans:[...fans],shadows:renderer.shadowMap.needsUpdate,inspections})};
 `,
 );
-const makeInteraction = () => interactionHarness(createGaragePower);
+const makeInteraction = () =>
+  interactionHarness(createGaragePower, keyboardNoteAction, parseKeyboardTarget);
 for (const id of ['kazam', 'projects']) {
   const h = makeInteraction();
   h.setHit(id + '-keyboard', id);
@@ -355,18 +489,37 @@ for (const id of ['kazam', 'projects']) {
   assert.equal(result.computer, null, 'A physical keyboard does not open a desktop');
   assert.deepEqual(
     result.calls,
-    [id + '-keyboard'],
-    'The powered keyboard dispatches its animation',
+    [keyboardNoteAction(id, '1')],
+    'The keyboard body dispatches the first note and its animation',
   );
-  assert.deepEqual(result.sounds, ['alien']);
+  assert.deepEqual(result.sounds, []);
+  assert.deepEqual(result.notes, [{ note: '1', computer: id }]);
   assert.deepEqual(result.fans, []);
+  for (const note of keyboardNoteIds) {
+    h.clear();
+    const action = keyboardNoteAction(id, note);
+    h.setHit(action, id + '-keyboard');
+    assert.equal(h.actionHit(), action, 'The individual note key wins over its keyboard parent');
+    h.interact(h.actionHit());
+    result = h.get();
+    assert.deepEqual(result.calls, [action]);
+    assert.deepEqual(
+      result.notes,
+      [{ note, computer: id }],
+      'The selected key plays only its assigned note on its own computer',
+    );
+    assert.deepEqual(result.sounds, []);
+    assert.equal(result.computer, null);
+    assert.equal(result.phase, 'room');
+  }
   h.clear();
   h.setHit(id);
   h.interact(h.actionHit());
   result = h.get();
   assert.equal(result.phase, 'approaching');
   assert.equal(result.computer, id, 'A monitor opens its own computer');
-  assert.deepEqual(result.sounds, ['chair'], 'Opening the screen never plays the keyboard song');
+  assert.deepEqual(result.sounds, ['chair'], 'Opening the screen never plays a keyboard note');
+  assert.deepEqual(result.notes, []);
   assert.deepEqual(result.calls, []);
 }
 for (const id of ['kazam', 'projects']) {
@@ -399,10 +552,18 @@ for (const id of ['kazam', 'projects']) {
   assert.equal(result.phase, 'room');
   assert.equal(result.computer, null);
   assert.deepEqual(result.sounds, [], 'Direct shortcuts cannot start an unpowered computer');
-  h.interact(id + '-keyboard');
+  for (const action of [
+    id + '-keyboard',
+    ...keyboardNoteIds.map((note) => keyboardNoteAction(id, note)),
+  ]) {
+    h.setHit(action, id);
+    assert.equal(h.actionHit(), null, 'Unpowered keyboard targets are not offered');
+    h.interact(action);
+  }
   result = h.get();
   assert.deepEqual(result.calls, []);
   assert.deepEqual(result.sounds, [], 'A disconnected keyboard stays silent and does not animate');
+  assert.deepEqual(result.notes, []);
   h.interact(id + '-power');
   result = h.get();
   assert.deepEqual(result.sounds, ['power-on']);
@@ -464,6 +625,7 @@ for (const id of ['kazam', 'projects']) {
     { paused: true },
     { paused: false, phase: 'using' },
     { phase: 'approaching' },
+    { phase: 'leaving' },
   ]) {
     h.set(blocked);
     h.clear();
@@ -474,11 +636,16 @@ for (const id of ['kazam', 'projects']) {
       'projects-power',
       'kazam-keyboard',
       'projects-keyboard',
+      ...keyboardNoteIds.flatMap((note) => [
+        keyboardNoteAction('kazam', note),
+        keyboardNoteAction('projects', note),
+      ]),
       'kazam',
       'projects',
     ])
       h.interact(action);
     assert.deepEqual(h.get().calls, []);
+    assert.deepEqual(h.get().notes, []);
     assert.deepEqual(
       h.get().sounds,
       [],
@@ -487,5 +654,5 @@ for (const id of ['kazam', 'projects']) {
   }
 }
 console.log(
-  'PASS: physical keyboard versus monitor/CPU actions, child hit priority, powered-off guards, independent power circuits, fan sync, power SFX, shadow refresh, and phase gating.',
+  'PASS: four physical keyboard notes versus monitor/CPU actions, child hit priority, powered-off guards, independent power circuits, fan sync, power SFX, shadow refresh, and phase gating.',
 );

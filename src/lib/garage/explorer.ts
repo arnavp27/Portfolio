@@ -13,6 +13,7 @@ import {
 import { computerPose, computerFov, ease, screenTransform } from './interaction';
 import { walkingPath, samplePath, type FloorPoint, destinations, courtyard } from './navigation';
 import type { GarageSound } from './sound';
+import { keyboardNoteAction, keyboardNoteFromKey, parseKeyboardTarget } from './keyboard-notes';
 import {
   createPointerCapture,
   type PointerCaptureState,
@@ -355,6 +356,8 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
         const action = node.userData.action as RoomAction;
         if ((action === 'kazam' || action === 'projects') && !world.isComputerOn(action))
           return null;
+        const keyboard = parseKeyboardTarget(action);
+        if (keyboard && !world.isComputerOn(keyboard.computer)) return null;
         return action;
       }
       node = node.parent;
@@ -392,11 +395,11 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
       applyPower(action);
       return;
     }
-    if (action === 'kazam-keyboard' || action === 'projects-keyboard') {
-      const id = action === 'kazam-keyboard' ? 'kazam' : 'projects';
-      if (world?.isComputerOn(id)) {
-        world.interact(action);
-        options.sound.play('alien');
+    const keyboard = parseKeyboardTarget(action);
+    if (keyboard) {
+      if (world?.isComputerOn(keyboard.computer)) {
+        world.interact(keyboardNoteAction(keyboard.computer, keyboard.note));
+        options.sound.playKeyboardNote(keyboard.note, keyboard.computer);
       }
       wake();
       return;
@@ -589,6 +592,15 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
       'input,textarea,select,[contenteditable=true],button,a[href],[role=button]',
     );
     if (!acceptsMovement(inputState(), ui, e.metaKey || e.ctrlKey || e.altKey)) return;
+    const note = keyboardNoteFromKey(e.key);
+    if (note) {
+      const keyboard = parseKeyboardTarget(target);
+      if (!locked || e.repeat || e.shiftKey || !keyboard || !world?.isComputerOn(keyboard.computer))
+        return;
+      e.preventDefault();
+      interact(keyboardNoteAction(keyboard.computer, note));
+      return;
+    }
     const k = e.key.toLowerCase();
     if (
       ![
@@ -822,7 +834,8 @@ export function mountExplorer(container: HTMLElement, options: Options): Explore
             auto ||
             velocity.length() > 0.001 ||
             !jump.grounded ||
-            Math.abs(jump.landing) > 0.00001)))
+            Math.abs(jump.landing) > 0.00001 ||
+            world.hasActiveKeyPresses())))
     )
       raf = requestAnimationFrame(draw);
     else lastTime = 0;

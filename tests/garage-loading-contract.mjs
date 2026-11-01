@@ -6,6 +6,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import ts from 'typescript';
 import { computers } from '../src/lib/garage/computers.ts';
+import * as keyboardNotes from '../src/lib/garage/keyboard-notes.ts';
 import { createGaragePower } from '../src/lib/garage/power.ts';
 import { random } from '../src/lib/graphics/textures.ts';
 import {
@@ -91,6 +92,7 @@ function roomRig({ assemblyError, scene = new THREE.Scene() } = {}) {
     'three/addons/utils/BufferGeometryUtils.js': { mergeGeometries },
     '../graphics/textures': { random, canvasTexture: () => track(new THREE.Texture()) },
     './computers': { computers },
+    './keyboard-notes': keyboardNotes,
     './power': { createGaragePower },
     './geometry-batching': { cloneBatchGeometry, pruneEmptyStaticGroups, releaseUnusedGeometries },
     './foliage': {

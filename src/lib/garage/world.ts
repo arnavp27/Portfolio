@@ -4,6 +4,14 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { canvasTexture, random } from '../graphics/textures';
 import { computers, type ComputerId } from './computers';
+import {
+  keyboardNoteIds,
+  keyboardNotes,
+  keyboardNoteAction,
+  parseKeyboardTarget,
+  type KeyboardAction,
+  type KeyboardNoteId,
+} from './keyboard-notes';
 import { createGaragePower } from './power';
 import { clearFoliageConstructionCache, createFoliage } from './foliage';
 import { buildCourtyard } from './environment';
@@ -25,8 +33,7 @@ export type RoomAction =
   | 'computer-power'
   | 'kazam-power'
   | 'projects-power'
-  | 'kazam-keyboard'
-  | 'projects-keyboard';
+  | KeyboardAction;
 
 export async function buildCameraRoom(scene: T.Scene) {
   const resources = createRoomResources(scene);
@@ -456,7 +463,8 @@ async function assembleCameraRoom(
   };
   const screens = {} as Record<ComputerId, Screen>;
   const towerLeds = {} as Record<ComputerId, T.MeshStandardMaterial>;
-  const keyboardKeys = {} as Record<ComputerId, { mesh: T.Mesh; rest: number; until: number }>;
+  type NoteKey = { mesh: T.Mesh; rest: number; until: number };
+  const keyboardKeys = {} as Record<ComputerId, Record<KeyboardNoteId, NoteKey>>;
   const powerButtons = {} as Record<ComputerId, T.Mesh>;
   function crt(p: P, width: number, title: string, id: ComputerId) {
     const g = group(p, 0, id),
@@ -481,22 +489,50 @@ async function assembleCameraRoom(
     const pc = computers[id];
     crt(pc.position, pc.width, pc.title, id);
   }
+  // Both keyboards share the four printed legends; only the playable caps stay dynamic.
+  const noteLabels = {} as Record<KeyboardNoteId, T.MeshStandardMaterial>;
+  for (const note of keyboardNoteIds) {
+    const map = texture(128, 64, (c) => {
+      c.fillStyle = '#29342e';
+      c.font = '700 38px Plex,monospace';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText(note, 64, 34);
+    });
+    const material = new T.MeshStandardMaterial({ map, alphaTest: 0.3, roughness: 0.9 });
+    mats.add(material);
+    noteLabels[note] = material;
+  }
   function keyboard(p: P, id: ComputerId, width = 0.65) {
     const g = group(p, 0, `${id}-keyboard`);
     box([0, 0, 0], [width, 0.045, 0.24], mat('#948b76'), g, [0, 0, 0], 0.01);
-    for (let j = 0; j < 4; j++)
-      for (let i = 0; i < 12; i++) {
-        const key = box(
+    for (let j = 0; j < 3; j++)
+      for (let i = 0; i < 12; i++)
+        box(
           [-width * 0.45 + i * width * 0.079, 0.027, -0.085 + j * 0.05],
           [width * 0.065, 0.012, 0.037],
           mat(i % 4 === 0 ? '#777768' : '#c5bba0'),
           g,
         );
-        if (j === 3 && i === 5) {
-          key.userData.dynamic = true;
-          keyboardKeys[id] = { mesh: key, rest: key.position.y, until: 0 };
-        }
-      }
+    keyboardKeys[id] = {} as Record<KeyboardNoteId, NoteKey>;
+    keyboardNoteIds.forEach((note, index) => {
+      const key = box(
+        [width * (-0.345 + index * 0.23), 0.03, 0.068],
+        [width * 0.205, 0.018, 0.045],
+        mat(keyboardNotes[note].color),
+        g,
+        [0, 0, 0],
+        0.003,
+      );
+      key.name = `${id}-note-${note}`;
+      key.userData.action = keyboardNoteAction(id, note);
+      // Keep its transform and child legend out of static batching.
+      key.userData.dynamic = true;
+      const label = plane([0, 0.0092, 0], 0.07, 0.035, noteLabels[note], key, [-Math.PI / 2, 0, 0]);
+      label.castShadow = false;
+      label.receiveShadow = false;
+      keyboardKeys[id][note] = { mesh: key, rest: key.position.y, until: 0 };
+    });
   }
   keyboard([-1.22, 0.9, 1.09], 'kazam');
   keyboard([0, 0.895, -2.04], 'projects', 0.68);
@@ -1073,14 +1109,31 @@ async function assembleCameraRoom(
     },
     isComputerOn: (id: ComputerId) => power.snapshot().computers[id],
     getPowerState: power.snapshot,
+    hasActiveKeyPresses: () => {
+      const now = performance.now();
+      for (const id of ['kazam', 'projects'] as const)
+        for (const note of keyboardNoteIds) {
+          const key = keyboardKeys[id][note];
+          // Expiry can pass during a slow frame; render the resting pose before sleeping.
+          if (key.until > now || key.mesh.position.y !== key.rest) return true;
+        }
+      return false;
+    },
     interact: (action: RoomAction) => {
+      const keyboardTarget = parseKeyboardTarget(action);
+      if (keyboardTarget) {
+        const state = power.snapshot();
+        if (state.computers[keyboardTarget.computer])
+          keyboardKeys[keyboardTarget.computer][keyboardTarget.note].until =
+            performance.now() + 170;
+        return state;
+      }
       const before = power.snapshot();
       if (action === 'lamp') lampOn = !lampOn;
       if (action === 'garage-lights') power.toggleLights();
       if (action === 'computer-power') power.toggleComputers();
       for (const id of ['kazam', 'projects'] as const) {
         if (action === `${id}-power`) power.toggleComputer(id);
-        if (action === `${id}-keyboard`) keyboardKeys[id].until = lastAnimation + 0.17;
       }
       if (action === 'car') carKick = 1;
       const after = power.snapshot();
@@ -1096,9 +1149,15 @@ async function assembleCameraRoom(
       rainMat.uniforms.time.value = time;
       carKick = Math.max(0, carKick - dt * 0.75);
       car.position.x = -0.55 + Math.sin((1 - carKick) * Math.PI) * 0.18;
+      // Reduced motion freezes world time, but a pressed key must always return to rest.
+      // This clock adds no timers or renders while the room is paused.
+      const interactionTime = performance.now();
       for (const id of ['kazam', 'projects'] as const) {
-        const key = keyboardKeys[id];
-        key.mesh.position.y = key.rest - (time < key.until ? 0.008 : 0);
+        for (const note of keyboardNoteIds) {
+          const key = keyboardKeys[id][note],
+            release = T.MathUtils.clamp((key.until - interactionTime) / 80, 0, 1);
+          key.mesh.position.y = key.rest - 0.008 * release * release;
+        }
         if (power.snapshot().computers[id]) {
           const screen = screens[id],
             remaining = screen.boot - time;

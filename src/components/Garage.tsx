@@ -17,6 +17,8 @@ import {
 } from '../lib/garage/sound';
 import type { ExplorerControls, ExplorerState } from '../lib/garage/explorer';
 import type { ComputerState, ComputerId } from '../lib/garage/computers';
+import { parseKeyboardTarget } from '../lib/garage/keyboard-notes';
+import type { RoomAction } from '../lib/garage/world';
 import '../styles/scene.css';
 import '../styles/garage.css';
 // Start loading the local editor (including its button styles) only in dev.
@@ -332,7 +334,7 @@ export default function Garage({ projects, articles }: Props) {
       } catch {}
       return !v;
     });
-  const labels = {
+  const labels: Partial<Record<RoomAction, string>> = {
     kazam: 'Use work computer',
     projects: 'Use personal computer',
     lamp: 'Switch desk lamp',
@@ -347,10 +349,13 @@ export default function Garage({ projects, articles }: Props) {
     'projects-power': game.power.computers.projects
       ? 'Turn personal computer off'
       : 'Turn personal computer on',
-    'kazam-keyboard': 'Tap keyboard',
-    'projects-keyboard': 'Tap keyboard',
   };
-  const label = game.target ? labels[game.target] : '';
+  const keyboardTarget = parseKeyboardTarget(game.target);
+  const label = keyboardTarget
+    ? `Play note ${keyboardTarget.note}${game.guided ? '' : ' · keys 1–4'}`
+    : game.target
+      ? labels[game.target] || ''
+      : '';
   const soundButton = (
     <button
       className="garage-sound-button garage-icon"
